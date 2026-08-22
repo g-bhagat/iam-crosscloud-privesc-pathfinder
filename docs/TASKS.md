@@ -25,10 +25,10 @@ to end against real sandbox data.
 - [x] 6. `graph_schema.py` — done
 - [ ] 7. Get `AWSCollector` running against the real sandbox account, debug against live API responses
 - [ ] 8. Implement `GCPCollector` for real (currently a stub — biggest remaining engineering chunk)
-- [ ] 9. Build the correlation engine (`FEDERATES_WITH` edge detector + 3-tier confidence logic)
-- [ ] 10. Build the escalation rule engine (encode the 5 patterns as graph-pattern checks)
-- [ ] 11. Build the pathfinder (graph walk from any node to an `is_admin=True` node)
-- [ ] 12. Build the pyvis visualization export
+- [x] 9. Build the correlation engine (`FEDERATES_WITH` edge detector + 3-tier confidence logic) — done (`src/analysis/correlation.py`, `src/analysis/confidence.py`), validated against synthetic Track 1-shaped data (`sample_data/sample_graph.json`); real-data validation still pending tasks 7-8
+- [x] 10. Build the escalation rule engine (encode the 5 patterns as graph-pattern checks) — done (`src/analysis/escalation_rules.py`); Patterns 1-2 implemented, Patterns 3-5 stubbed as deferred per SCOPE.md
+- [x] 11. Build the pathfinder (graph walk from any node to an `is_admin=True` node) — done (`src/analysis/pathfinder.py`, networkx-based)
+- [x] 12. Build the pyvis visualization export — done (`src/visualization/pyvis_export.py`)
 
 ---
 

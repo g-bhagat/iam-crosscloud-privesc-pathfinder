@@ -75,6 +75,13 @@ class Node:
         d["cloud"] = self.cloud.value
         return d
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Node":
+        d = dict(d)
+        d["type"] = NodeType(d["type"])
+        d["cloud"] = Cloud(d["cloud"])
+        return cls(**d)
+
 
 @dataclass
 class Edge:
@@ -92,3 +99,10 @@ class Edge:
         d["type"] = self.type.value
         d["cloud"] = self.cloud.value
         return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Edge":
+        d = dict(d)
+        d["type"] = EdgeType(d["type"])
+        d["cloud"] = Cloud(d["cloud"])
+        return cls(**d)

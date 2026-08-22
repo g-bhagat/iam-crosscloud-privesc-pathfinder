@@ -1,0 +1,13 @@
+# Collectors (task 7-8)
+boto3>=1.34
+google-cloud-asset>=3.25
+google-cloud-iam>=2.15
+
+# Analysis layer (task 9-11)
+networkx>=3.2
+
+# Visualization export (task 12)
+pyvis>=0.3.2
+
+# Tests
+pytest>=8.0
