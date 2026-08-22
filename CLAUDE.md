@@ -36,18 +36,28 @@ they are the source of truth for scope and sequencing, not this file.
 
 - `src/graph_schema.py` — unified node/edge schema shared across all collectors
 - `src/collectors/` — AWS (real), GCP (stub, needs implementation), Azure (stub, deferred)
+- `src/analysis/` — correlation engine, confidence scoring, escalation rule engine, pathfinder (tasks 9-11)
+- `src/visualization/` — pyvis graph export (task 12)
+- `sample_data/`, `scripts/generate_sample_graph.py`, `scripts/run_pipeline_demo.py` — synthetic Track 1-shaped fixture + end-to-end demo, used to validate tasks 9-12 without live sandbox credentials
+- `tests/` — pytest suite for the analysis layer
+- `terraform/track1/` — AWS + GCP sandbox infra for Track 1 (tasks 13-18); written, not yet applied/validated against live accounts
 - `docs/` — the public portfolio site (GitHub Pages, served from here)
 - `SCOPE.md`, `TASKS.md` — read these first, always
 
 ## Current status
 
 Check TASKS.md checkboxes for the authoritative current state. As of
-last handoff: scope doc and threat model doc are both written
-(`SCOPE.md`, `docs/THREAT_MODEL.md` — STRIDE analysis on the 3 trust
-boundaries: cloud API, credential use, publication; plus the 5-pattern
-escalation catalog and the 3-tier correlation confidence model). Next
-up is external, not code: create the dedicated AWS + GCP sandbox
-accounts and their least-privilege read-only credentials (tasks 3–5) —
-`AWSCollector` can't run against a real account (task 7) and
-`GCPCollector` can't be implemented for real (task 8) until those
-exist. GCP collector is still a stub.
+last handoff: Phase 0 is code-complete except for the live-credential
+tasks. Done: scope + threat model docs (`SCOPE.md`, `docs/THREAT_MODEL.md`),
+`graph_schema.py`, and the full analysis layer (`src/analysis/`,
+`src/visualization/pyvis_export.py`, tasks 9-12) — validated end to end
+against a synthetic Track 1-shaped graph (`sample_data/sample_graph.json`,
+`scripts/run_pipeline_demo.py`), confirming both the true positive (loose
+GCP WIF provider → `roles/owner` SA) and the true negative (correctly
+scoped control) at the correlation + rule-engine + pathfinder level.
+Track 1 Terraform (`terraform/track1/`) is also written but not yet
+applied. Still blocked on external setup, not code: create the dedicated
+AWS + GCP sandbox accounts and their least-privilege read-only
+credentials (tasks 3–5) — `AWSCollector` can't run against a real account
+(task 7) and `GCPCollector` can't be implemented for real (task 8) until
+those exist; the analysis layer's real-data validation depends on both.

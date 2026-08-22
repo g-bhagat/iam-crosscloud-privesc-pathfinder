@@ -22,6 +22,12 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
+
+# Generated demo/visualization output (regenerate via scripts/run_pipeline_demo.py)
+sample_data/*.html
+# pyvis's local asset bundle if cdn_resources="in_line" is ever bypassed
+/lib/
 
 # OS
 .DS_Store

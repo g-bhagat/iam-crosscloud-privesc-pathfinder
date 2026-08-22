@@ -1,0 +1,140 @@
+{
+  "nodes": [
+    {
+      "id": "federated:arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
+      "type": "app_registration",
+      "cloud": "cross_cloud",
+      "name": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
+      "is_admin": false,
+      "mfa_enabled": null,
+      "external_facing": true,
+      "attributes": {}
+    },
+    {
+      "id": "aws:role:arn:aws:iam::123456789012:role/track1-cicd-deploy-role",
+      "type": "role",
+      "cloud": "aws",
+      "name": "track1-cicd-deploy-role",
+      "is_admin": false,
+      "mfa_enabled": null,
+      "external_facing": false,
+      "attributes": {
+        "arn": "arn:aws:iam::123456789012:role/track1-cicd-deploy-role"
+      }
+    },
+    {
+      "id": "aws:group:arn:aws:iam::123456789012:group/break-glass-admins",
+      "type": "group",
+      "cloud": "aws",
+      "name": "break-glass-admins",
+      "is_admin": true,
+      "mfa_enabled": null,
+      "external_facing": false,
+      "attributes": {
+        "arn": "arn:aws:iam::123456789012:group/break-glass-admins"
+      }
+    },
+    {
+      "id": "aws:user:arn:aws:iam::123456789012:user/sam-devops",
+      "type": "user",
+      "cloud": "aws",
+      "name": "sam-devops",
+      "is_admin": false,
+      "mfa_enabled": true,
+      "external_facing": false,
+      "attributes": {
+        "arn": "arn:aws:iam::123456789012:user/sam-devops"
+      }
+    },
+    {
+      "id": "aws:role:arn:aws:iam::123456789012:role/legacy-break-glass",
+      "type": "role",
+      "cloud": "aws",
+      "name": "legacy-break-glass",
+      "is_admin": true,
+      "mfa_enabled": null,
+      "external_facing": false,
+      "attributes": {
+        "note": "no inbound edges -- deliberately unreachable in this sample"
+      }
+    },
+    {
+      "id": "gcp:wif_bridge:https://token.actions.githubusercontent.com",
+      "type": "app_registration",
+      "cloud": "cross_cloud",
+      "name": "https://token.actions.githubusercontent.com",
+      "is_admin": false,
+      "mfa_enabled": null,
+      "external_facing": true,
+      "attributes": {}
+    },
+    {
+      "id": "gcp:service_account:track1-owner-sa@track1-sandbox-project.iam.gserviceaccount.com",
+      "type": "service_account",
+      "cloud": "gcp",
+      "name": "track1-owner-sa",
+      "is_admin": true,
+      "mfa_enabled": null,
+      "external_facing": false,
+      "attributes": {
+        "email": "track1-owner-sa@track1-sandbox-project.iam.gserviceaccount.com",
+        "role": "roles/owner"
+      }
+    },
+    {
+      "id": "gcp:service_account:track1-scoped-sa@track1-sandbox-project.iam.gserviceaccount.com",
+      "type": "service_account",
+      "cloud": "gcp",
+      "name": "track1-scoped-sa",
+      "is_admin": false,
+      "mfa_enabled": null,
+      "external_facing": false,
+      "attributes": {
+        "email": "track1-scoped-sa@track1-sandbox-project.iam.gserviceaccount.com",
+        "role": "roles/viewer"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "federated:arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
+      "target": "aws:role:arn:aws:iam::123456789012:role/track1-cicd-deploy-role",
+      "type": "federates_with",
+      "cloud": "cross_cloud",
+      "risk_weight": 1.0,
+      "condition": "{\"StringEquals\": {\"token.actions.githubusercontent.com:aud\": \"sts.amazonaws.com\", \"token.actions.githubusercontent.com:sub\": \"repo:acme-corp/iam-crosscloud-victim-pipeline:ref:refs/heads/main\"}}",
+      "evidence": "OIDC/SAML federated trust",
+      "attributes": {}
+    },
+    {
+      "source": "aws:user:arn:aws:iam::123456789012:user/sam-devops",
+      "target": "aws:group:arn:aws:iam::123456789012:group/break-glass-admins",
+      "type": "member_of",
+      "cloud": "aws",
+      "risk_weight": 1.0,
+      "condition": null,
+      "evidence": null,
+      "attributes": {}
+    },
+    {
+      "source": "gcp:wif_bridge:https://token.actions.githubusercontent.com",
+      "target": "gcp:service_account:track1-owner-sa@track1-sandbox-project.iam.gserviceaccount.com",
+      "type": "federates_with",
+      "cloud": "cross_cloud",
+      "risk_weight": 1.0,
+      "condition": "assertion.repository_owner == \"acme-corp\"",
+      "evidence": "Workload Identity Federation binding (gh-loose-org-scope)",
+      "attributes": {}
+    },
+    {
+      "source": "gcp:wif_bridge:https://token.actions.githubusercontent.com",
+      "target": "gcp:service_account:track1-scoped-sa@track1-sandbox-project.iam.gserviceaccount.com",
+      "type": "federates_with",
+      "cloud": "cross_cloud",
+      "risk_weight": 1.0,
+      "condition": "assertion.repository == \"acme-corp/iam-crosscloud-victim-pipeline\" && assertion.ref == \"refs/heads/main\"",
+      "evidence": "Workload Identity Federation binding (gh-scoped-repo-branch)",
+      "attributes": {}
+    }
+  ]
+}

@@ -96,4 +96,37 @@ class GCPCollector:
         #    pattern, GitHub repo, Azure AD tenant) to the impersonated GCP SA.
         #    THIS IS THE KEY CROSS-CLOUD EDGE. Flag pools with no
         #    attribute-condition as external_facing / high risk_weight.
+        #
+        # Node/edge shape expected by src/analysis/correlation.py (task 9)
+        # -- match this exactly so merge_oidc_bridges() can pair a WIF
+        # provider up with the AWS-side node AWSCollector emits for the
+        # same OIDC issuer:
+        #
+        #   for a THIRD-PARTY-issuer provider (oidc { issuer_uri = ... },
+        #   e.g. GitHub Actions -- Pattern 1 shape):
+        #     bridge_id = f"gcp:wif_bridge:{provider.oidc.issuer_uri}"
+        #     # setdefault, not assignment: a pool commonly holds MULTIPLE
+        #     # providers sharing one issuer_uri (e.g. Track 1's "loose" and
+        #     # "scoped" providers both point at GitHub Actions) -- they
+        #     # must fan out as separate edges from the SAME bridge node,
+        #     # not each overwrite it.
+        #     self.nodes.setdefault(bridge_id, Node(
+        #         id=bridge_id, type=NodeType.APP_REGISTRATION,
+        #         cloud=Cloud.CROSS_CLOUD, name=provider.oidc.issuer_uri,
+        #         external_facing=True,
+        #     ))
+        #     self.edges.append(Edge(
+        #         source=bridge_id, target=sa_node_id,
+        #         type=EdgeType.FEDERATES_WITH, cloud=Cloud.CROSS_CLOUD,
+        #         condition=provider.attribute_condition,  # raw CEL string
+        #         evidence=f"Workload Identity Federation binding ({provider.name})",
+        #     ))
+        #
+        #   for an AWS-principal provider (Pattern 2/3 shape -- GCP trusting
+        #   an AWS account/role directly, no third-party issuer): skip the
+        #   bridge node entirely and let correlation.py's
+        #   merge_direct_references() resolve it -- put the referenced AWS
+        #   role ARN, if the condition names one, directly in
+        #   `condition` (correlation.py string-matches it against every
+        #   AWS node's `attributes["arn"]`).
         raise NotImplementedError("Wire up Workload Identity Pool + Provider listing")
