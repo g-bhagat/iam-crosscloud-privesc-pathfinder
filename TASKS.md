@@ -17,8 +17,8 @@ to end against real sandbox data.
 
 ## Phase 0 — Shared foundation
 
-- [ ] 1. Write the scope / rules-of-engagement doc
-- [ ] 2. Write the threat model doc (trust boundaries, 5 escalation paths, correlation confidence tiers)
+- [x] 1. Write the scope / rules-of-engagement doc — done (`SCOPE.md`)
+- [x] 2. Write the threat model doc (trust boundaries, 5 escalation paths, correlation confidence tiers) — done (`docs/THREAT_MODEL.md`)
 - [ ] 3. Create a dedicated AWS free-tier sandbox account
 - [ ] 4. Create a dedicated GCP free-tier project
 - [ ] 5. Create a least-privilege, read-only scanning credential in each cloud

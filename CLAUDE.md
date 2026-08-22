@@ -42,6 +42,12 @@ they are the source of truth for scope and sequencing, not this file.
 ## Current status
 
 Check TASKS.md checkboxes for the authoritative current state. As of
-last handoff: Phase 0 foundation in progress, GCP collector still a
-stub, threat model doc (STRIDE analysis on the 3 trust boundaries —
-cloud API, credential use, publication) not yet written.
+last handoff: scope doc and threat model doc are both written
+(`SCOPE.md`, `docs/THREAT_MODEL.md` — STRIDE analysis on the 3 trust
+boundaries: cloud API, credential use, publication; plus the 5-pattern
+escalation catalog and the 3-tier correlation confidence model). Next
+up is external, not code: create the dedicated AWS + GCP sandbox
+accounts and their least-privilege read-only credentials (tasks 3–5) —
+`AWSCollector` can't run against a real account (task 7) and
+`GCPCollector` can't be implemented for real (task 8) until those
+exist. GCP collector is still a stub.
