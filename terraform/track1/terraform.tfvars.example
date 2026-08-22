@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars and fill in your sandbox values.
+# terraform.tfvars is gitignored -- never commit it (SCOPE.md rule 5: no
+# real account IDs / project IDs in anything committed to this repo).
+
+github_org    = "your-github-username"
+github_repo   = "iam-crosscloud-victim-pipeline"
+github_branch = "main"
+
+# Leave false unless you want this config to also create the GitHub repo
+# and workflow file. If true, set GITHUB_TOKEN in your environment rather
+# than putting a token in this file.
+manage_github_repo = false
+
+aws_region    = "us-east-1"
+aws_role_name = "track1-cicd-deploy-role"
+
+# Your dedicated GCP sandbox project ID (task 4) -- never a real/prod project.
+gcp_project_id = "your-sandbox-project-id"
+gcp_region     = "us-central1"
+
+wif_pool_id               = "track1-github-pool"
+owner_service_account_id  = "track1-owner-sa"
+scoped_service_account_id = "track1-scoped-sa"
+
+enable_gcp_apis = true
