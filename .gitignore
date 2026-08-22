@@ -1,0 +1,27 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+crash.log
+crash.*.log
+# .terraform.lock.hcl is intentionally NOT ignored -- commit it for
+# reproducible provider version resolution.
+
+# Credentials -- SCOPE.md: no long-lived credentials committed, ever
+*.pem
+*.key
+service-account*.json
+*-credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store
