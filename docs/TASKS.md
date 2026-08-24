@@ -28,7 +28,7 @@ to end against real sandbox data.
 - [x] 9. Build the correlation engine (`FEDERATES_WITH` edge detector + 3-tier confidence logic) — done (`src/analysis/correlation.py`, `src/analysis/confidence.py`); validated against synthetic Track 1-shaped data (`sample_data/sample_graph.json`) AND against real (mocked, not hand-crafted) output from both collectors together (`tests/test_collector_correlation_integration.py`); true live-account validation still pending tasks 3-5
 - [x] 10. Build the escalation rule engine (encode the 5 patterns as graph-pattern checks) — done (`src/analysis/escalation_rules.py`); Patterns 1-2 implemented, Patterns 3-5 stubbed as deferred per SCOPE.md
 - [x] 11. Build the pathfinder (graph walk from any node to an `is_admin=True` node) — done (`src/analysis/pathfinder.py`, networkx-based)
-- [x] 12. Build the pyvis visualization export — done (`src/visualization/pyvis_export.py`, `src/sanitize.py`); `sanitize=True` masks real account IDs/ARNs/project IDs, wired in automatically by `scripts/run_detector.py` whenever `--output` resolves under `docs/`
+- [x] 12. Build the pyvis visualization export — done (`src/visualization/pyvis_export.py`, `src/sanitize.py`); `sanitize=True` masks real account IDs/ARNs/project IDs, wired in automatically by `scripts/run_detector.py` whenever `--output` resolves under `docs/`; self-loop capability markers merge into one edge per node and zero-degree nodes are hidden by default so a real AdministratorAccess/roles/owner holder does not render as a knot of overlapping loops; a fixed corner annotation on the artifact itself states the scope boundary (escalation-relevant capabilities only, not a full IAM permissions inventory)
 
 ---
 

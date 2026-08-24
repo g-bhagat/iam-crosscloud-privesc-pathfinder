@@ -20,16 +20,37 @@ Visual encoding:
     cheapest/most-exploitable edges visually pop
   - highlighted escalation paths (from pathfinder.py) get a thicker red
     outline so the finding is legible without reading the JSON
+
+Two cleanups on top of the raw node/edge lists, both because the raw
+collector output isn't shaped for a legible picture even though it's
+exactly right for the analysis layer:
+  - self-loop edges (AWSCollector/_emit_sensitive_edges,
+    GCPCollector/_process_iam_policy_search_result -- both mark "this
+    identity holds capability X" as source==target) collapse to ONE
+    rendered edge per node, not one per action. A single
+    AdministratorAccess/roles/owner holder can otherwise match every
+    entry in SENSITIVE_ACTIONS/HIGH_PRIV_GCP_ROLES at once and render as
+    a dense knot of overlapping loops on one node. The merged edge's
+    tooltip lists every distinct capability.
+  - zero-degree nodes (no edge touches them at all -- not even a
+    self-loop) are hidden by default (`show_isolated_nodes=False`).
+    They add clutter without signal: nothing points at them and they
+    point at nothing, so they can never be part of a rendered escalation
+    path. Pass `show_isolated_nodes=True` to include them back.
 """
 
 from __future__ import annotations
 
+import logging
+from collections import defaultdict
 from pathlib import Path
 
 from pyvis.network import Network
 
 from ..graph_schema import Cloud, Edge, Node
 from ..sanitize import sanitize_graph
+
+logger = logging.getLogger(__name__)
 
 CLOUD_COLOR = {
     Cloud.AWS: "#FF9900",
@@ -44,6 +65,110 @@ CONFIDENCE_EDGE_COLOR = {
 }
 DEFAULT_EDGE_COLOR = "#9CA3AF"
 
+# A scope boundary, not a bug: AWSCollector/GCPCollector only surface
+# identity relationships and the specific action/role patterns
+# escalation_rules.py's 5-pattern catalog cares about (see their
+# module docstrings). Ordinary data-plane permissions (S3 read/write, log
+# writes, etc.) are deliberately never modeled at all -- this tool answers
+# "can X escalate privilege," not "what can X do." That's easy to forget
+# looking at a rendered graph in isolation, so it has to be visible on the
+# artifact itself, not just in source comments -- anyone screenshotting
+# this for the portfolio site or handing it to someone else loses the
+# source-code context that would otherwise explain the gap.
+SCOPE_BOUNDARY_NOTE = (
+    "This graph shows identity relationships and privilege-escalation-relevant "
+    "capabilities only — not a complete IAM permissions inventory. Ordinary "
+    "data-plane permissions (e.g. S3 read/write, log writes) are intentionally excluded."
+)
+
+
+def _inject_scope_boundary_annotation(html: str, note: str = SCOPE_BOUNDARY_NOTE) -> str:
+    """
+    Insert a fixed-position corner banner carrying `note` just before
+    `</body>`. Relies on pyvis's template rendering `net.heading` (and
+    hence this string, injected the same way) as raw HTML, not
+    escaped text -- Environment(loader=...) below is constructed without
+    autoescape, confirmed against the installed pyvis version. `position:
+    fixed` keeps it pinned to the viewport regardless of how the graph
+    itself is panned/zoomed (vis.js panning is internal to the canvas
+    element, independent of page scroll); `pointer-events: none` keeps it
+    from blocking clicks on nodes/edges underneath.
+    """
+    banner = f"""
+<div style="
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    max-width: 420px;
+    padding: 10px 14px;
+    background: rgba(11, 15, 25, 0.92);
+    border: 1px solid #F59E0B;
+    border-radius: 6px;
+    color: #E5E7EB;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+    z-index: 1000;
+    pointer-events: none;
+">
+    <strong style="color:#F59E0B;">Scope note:</strong> {note}
+</div>
+"""
+    if "</body>" in html:
+        return html.replace("</body>", banner + "</body>")
+    return html + banner  # defensive fallback if the template ever changes shape
+
+
+def _nodes_with_any_edge(edges: list[Edge]) -> set[str]:
+    touched: set[str] = set()
+    for e in edges:
+        touched.add(e.source)
+        touched.add(e.target)
+    return touched
+
+
+def _merge_self_loops(edges: list[Edge]) -> list[Edge]:
+    """Collapse every self-loop (source == target) sharing a node into one
+    edge, combining their evidence into a single tooltip. Non-self-loop
+    edges pass through untouched -- this only targets the "holds N
+    capabilities" self-loop pattern, not general multi-edge pairs (two
+    distinct CAN_ASSUME grants between two different real nodes are still
+    two separate, individually meaningful edges)."""
+    self_loops_by_node: dict[str, list[Edge]] = defaultdict(list)
+    other_edges: list[Edge] = []
+    for e in edges:
+        if e.source == e.target:
+            self_loops_by_node[e.source].append(e)
+        else:
+            other_edges.append(e)
+
+    merged: list[Edge] = []
+    for node_id, loop_edges in self_loops_by_node.items():
+        if len(loop_edges) == 1:
+            merged.append(loop_edges[0])
+            continue
+        # Dedupe identical (type, evidence) pairs -- defensive, in case a
+        # collector ever emits the same capability marker twice.
+        seen: list[tuple[str, str]] = []
+        for e in loop_edges:
+            entry = (e.type.value, e.evidence or "")
+            if entry not in seen:
+                seen.append(entry)
+        tooltip = "\n".join(f"{t}: {ev}" if ev else t for t, ev in seen)
+        cheapest = min((e.risk_weight for e in loop_edges if e.risk_weight is not None), default=1.0)
+        merged.append(
+            Edge(
+                source=node_id,
+                target=node_id,
+                type=loop_edges[0].type,
+                cloud=loop_edges[0].cloud,
+                risk_weight=cheapest,
+                evidence=tooltip,
+                attributes={"merged_capability_count": len(seen)},
+            )
+        )
+    return merged + other_edges
+
 
 def export_graph(
     nodes: list[Node],
@@ -52,6 +177,7 @@ def export_graph(
     highlight_node_ids: set[str] | None = None,
     title: str = "Cross-Cloud IAM Privilege Escalation Graph",
     sanitize: bool = False,
+    show_isolated_nodes: bool = False,
 ) -> Path:
     """
     Render `nodes`/`edges` (post correlation.correlate(), ideally) to an
@@ -65,12 +191,32 @@ def export_graph(
         you're passing in here -- this function translates them through
         the same mapping internally, so they still match after
         sanitization changes the node IDs.
+
+    show_isolated_nodes: if False (default), nodes with no edge touching
+        them at all -- not even a self-loop -- are dropped from the
+        rendered view. They add clutter without signal: nothing points at
+        them, they point at nothing, so they can never appear in a
+        rendered escalation path. A logged message reports how many were
+        hidden; pass True to include them.
     """
     highlight_node_ids = highlight_node_ids or set()
 
     if sanitize:
         nodes, edges, sanitizer = sanitize_graph(nodes, edges)
         highlight_node_ids = {sanitizer.sanitize_text(nid) for nid in highlight_node_ids}
+
+    edges = _merge_self_loops(edges)
+
+    if not show_isolated_nodes:
+        connected = _nodes_with_any_edge(edges)
+        hidden = [n for n in nodes if n.id not in connected]
+        if hidden:
+            logger.info(
+                "Hiding %d isolated node(s) with no edges (pass show_isolated_nodes=True to include them): %s",
+                len(hidden),
+                ", ".join(n.name for n in hidden[:10]) + (", ..." if len(hidden) > 10 else ""),
+            )
+        nodes = [n for n in nodes if n.id in connected]
 
     net = Network(
         height="850px",
@@ -115,18 +261,26 @@ def export_graph(
             size=26 if n.is_admin else 16,
         )
 
+    rendered_node_ids = {n.id for n in nodes}
     for e in edges:
-        if e.source not in {n.id for n in nodes} or e.target not in {n.id for n in nodes}:
-            continue  # skip dangling references rather than let pyvis raise
+        if e.source not in rendered_node_ids or e.target not in rendered_node_ids:
+            continue  # skip dangling references (or an isolated-node's own edges, now hidden) rather than let pyvis raise
         confidence = e.attributes.get("confidence") if e.attributes else None
         color = CONFIDENCE_EDGE_COLOR.get(confidence, DEFAULT_EDGE_COLOR)
         weight = e.risk_weight if e.risk_weight is not None else 1.0
         # Inverse: cheaper (more exploitable) edges render thicker.
         width = max(1.0, 5.0 - (weight * 3.0))
 
-        label = e.type.value
-        if confidence:
-            label += f" ({confidence})"
+        capability_count = e.attributes.get("merged_capability_count") if e.attributes else None
+        if capability_count:
+            # A merged self-loop: e.type is only the first of several
+            # distinct capability types it now represents, so label by
+            # count instead -- the full breakdown is in the tooltip.
+            label = f"{capability_count} capabilities"
+        else:
+            label = e.type.value
+            if confidence:
+                label += f" ({confidence})"
 
         net.add_edge(
             e.source,
@@ -140,5 +294,11 @@ def export_graph(
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    net.write_html(str(output_path), open_browser=False, notebook=False)
+    # generate_html() + manual write (what write_html() does internally
+    # for cdn_resources="in_line", minus the part we don't want) so the
+    # scope-boundary banner can be injected into the actual HTML string
+    # before it hits disk.
+    html = net.generate_html(notebook=False)
+    html = _inject_scope_boundary_annotation(html)
+    output_path.write_text(html)
     return output_path
