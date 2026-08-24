@@ -24,10 +24,13 @@ is in scope. Azure is explicitly out of scope for implementation (see
 
 1. **Read-only credentials only, for the tool itself.** The scanning
    tool (collectors) authenticates using a purpose-built, least-privilege
-   IAM identity in each cloud, scoped to read-only IAM/identity APIs
-   (`iam:List*`, `iam:Get*`, `sts:GetCallerIdentity` on AWS;
-   `cloudasset.viewer` equivalent on GCP). The tool never has write or
-   delete permissions on either account.
+   IAM identity in each cloud, scoped to read-only IAM/identity APIs --
+   `iam:List*`/`iam:Get*`/`sts:GetCallerIdentity` is the informal summary;
+   `terraform/scanner/aws.tf` is the actual enumerated policy (identity
+   inventory, attached/inline policy inspection, and OIDC provider
+   inventory via `iam:ListOpenIDConnectProviders`/`iam:GetOpenIDConnectProvider`)
+   on AWS, `cloudasset.viewer` equivalent on GCP. The tool never has write
+   or delete permissions on either account.
 2. **All misconfigurations are deliberately planted, in these sandbox
    accounts only, by me.** Nothing in this project scans, probes, or
    references any account, tenant, or credential I do not own and did

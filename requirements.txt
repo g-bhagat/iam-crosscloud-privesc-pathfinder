@@ -11,3 +11,4 @@ pyvis>=0.3.2
 
 # Tests
 pytest>=8.0
+moto[iam,sts]>=5.0
