@@ -38,6 +38,54 @@ def test_gcp_sa_email_domain_masked_short_name_preserved():
     assert "iam-pathfinder-sandbox" not in out
 
 
+def test_human_email_masked():
+    """A bare human user email (e.g. a NodeType.USER node's name/id) must
+    be masked too -- not just GCP SA emails. Mirrors
+    test_gcp_sa_email_domain_masked_short_name_preserved, but unlike the
+    SA case, the local part is itself identifying (a real person), so the
+    whole address is replaced rather than partially preserved."""
+    s = GraphSanitizer()
+    out = s.sanitize_text("gopilalbhagat9@gmail.com")
+    assert out != "gopilalbhagat9@gmail.com"
+    assert "gopilalbhagat9" not in out
+    assert "gmail.com" not in out
+    assert out == "sanitized-user-1@example.com"
+
+
+def test_same_human_email_maps_to_same_placeholder():
+    s = GraphSanitizer()
+    first = s.sanitize_text("alice@example.org")
+    second = s.sanitize_text("alice@example.org")
+    assert first == second
+
+
+def test_different_human_emails_get_different_placeholders():
+    s = GraphSanitizer()
+    a = s.sanitize_text("alice@example.org")
+    b = s.sanitize_text("bob@example.org")
+    assert a != b
+
+
+def test_human_email_regex_does_not_reprocess_already_sanitized_gcp_sa_email():
+    """The human-email pattern runs after the GCP-SA-email pattern and
+    must not re-mask its output -- otherwise the SA's short name
+    (deliberately preserved by the SA-specific rule) would be destroyed
+    too."""
+    s = GraphSanitizer()
+    out = s.sanitize_text("track1-owner-sa@iam-pathfinder-sandbox.iam.gserviceaccount.com")
+    assert out.startswith("track1-owner-sa@sanitized-gcp-project-1")
+    assert out.endswith(".iam.gserviceaccount.com")
+
+
+def test_human_email_inside_gcp_user_node_id_masked():
+    """gcp:user:<email> is the real node.id shape GCPCollector._member_to_node
+    produces for a `user:` IAM binding member."""
+    s = GraphSanitizer()
+    out = s.sanitize_text("gcp:user:alice@example.org")
+    assert out.startswith("gcp:user:")
+    assert "alice@example.org" not in out
+
+
 def test_project_id_consistent_across_path_and_email_in_same_string():
     s = GraphSanitizer()
     text = (
