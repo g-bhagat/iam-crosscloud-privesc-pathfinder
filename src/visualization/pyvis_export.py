@@ -65,6 +65,59 @@ CONFIDENCE_EDGE_COLOR = {
 }
 DEFAULT_EDGE_COLOR = "#9CA3AF"
 
+# A scope boundary, not a bug: AWSCollector/GCPCollector only surface
+# identity relationships and the specific action/role patterns
+# escalation_rules.py's 5-pattern catalog cares about (see their
+# module docstrings). Ordinary data-plane permissions (S3 read/write, log
+# writes, etc.) are deliberately never modeled at all -- this tool answers
+# "can X escalate privilege," not "what can X do." That's easy to forget
+# looking at a rendered graph in isolation, so it has to be visible on the
+# artifact itself, not just in source comments -- anyone screenshotting
+# this for the portfolio site or handing it to someone else loses the
+# source-code context that would otherwise explain the gap.
+SCOPE_BOUNDARY_NOTE = (
+    "This graph shows identity relationships and privilege-escalation-relevant "
+    "capabilities only — not a complete IAM permissions inventory. Ordinary "
+    "data-plane permissions (e.g. S3 read/write, log writes) are intentionally excluded."
+)
+
+
+def _inject_scope_boundary_annotation(html: str, note: str = SCOPE_BOUNDARY_NOTE) -> str:
+    """
+    Insert a fixed-position corner banner carrying `note` just before
+    `</body>`. Relies on pyvis's template rendering `net.heading` (and
+    hence this string, injected the same way) as raw HTML, not
+    escaped text -- Environment(loader=...) below is constructed without
+    autoescape, confirmed against the installed pyvis version. `position:
+    fixed` keeps it pinned to the viewport regardless of how the graph
+    itself is panned/zoomed (vis.js panning is internal to the canvas
+    element, independent of page scroll); `pointer-events: none` keeps it
+    from blocking clicks on nodes/edges underneath.
+    """
+    banner = f"""
+<div style="
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    max-width: 420px;
+    padding: 10px 14px;
+    background: rgba(11, 15, 25, 0.92);
+    border: 1px solid #F59E0B;
+    border-radius: 6px;
+    color: #E5E7EB;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+    z-index: 1000;
+    pointer-events: none;
+">
+    <strong style="color:#F59E0B;">Scope note:</strong> {note}
+</div>
+"""
+    if "</body>" in html:
+        return html.replace("</body>", banner + "</body>")
+    return html + banner  # defensive fallback if the template ever changes shape
+
 
 def _nodes_with_any_edge(edges: list[Edge]) -> set[str]:
     touched: set[str] = set()
@@ -241,5 +294,11 @@ def export_graph(
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    net.write_html(str(output_path), open_browser=False, notebook=False)
+    # generate_html() + manual write (what write_html() does internally
+    # for cdn_resources="in_line", minus the part we don't want) so the
+    # scope-boundary banner can be injected into the actual HTML string
+    # before it hits disk.
+    html = net.generate_html(notebook=False)
+    html = _inject_scope_boundary_annotation(html)
+    output_path.write_text(html)
     return output_path
