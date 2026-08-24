@@ -17,9 +17,16 @@ Usage:
         --gcp-graph /tmp/gcp_graph.json \\
         --output /tmp/track1-finding.html
 
-Output defaults to /tmp, not docs/, deliberately -- confirm
-pyvis_export.py's sanitization is actually in place before anything
-produced here ever lands in the public docs/ folder for real.
+Output defaults to /tmp, not docs/, deliberately. If --output resolves
+to anywhere under a docs/ directory, this script forces sanitize=True
+on the pyvis export automatically (src/sanitize.py masks real account
+IDs/ARNs/project IDs) -- SCOPE.md rule 5 is not optional for anything
+that reaches the public portfolio site, so this isn't left to a flag
+you have to remember. Pass --sanitize to mask real identifiers for a
+non-docs/ output path too (e.g. sharing a screenshot elsewhere); pass
+--no-sanitize to force raw output even under docs/ if you've already
+sanitized by some other means and don't want double-masking -- use that
+override deliberately, not by default.
 """
 
 import argparse
@@ -29,11 +36,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.analysis.correlation import correlate  # noqa: E402
-from src.analysis.escalation_rules import run_all  # noqa: E402
-from src.analysis.pathfinder import find_escalation_paths  # noqa: E402
-from src.graph_schema import Edge, Node, NodeType, EdgeType, Cloud  # noqa: E402
-from src.visualization.pyvis_export import export_graph  # noqa: E402
+from src.analysis.correlation import correlate
+from src.analysis.escalation_rules import run_all
+from src.analysis.pathfinder import find_escalation_paths
+from src.graph_schema import Cloud, Edge, EdgeType, Node, NodeType
+from src.visualization.pyvis_export import export_graph
 
 
 def load_graph(path: str) -> tuple[list[Node], list[Edge]]:
@@ -89,7 +96,34 @@ def main():
     parser.add_argument("--aws-graph", required=True, help="JSON dump from run_aws_collector.py --dump-json")
     parser.add_argument("--gcp-graph", required=True, help="JSON dump from run_gcp_collector.py --dump-json")
     parser.add_argument("--output", default="/tmp/track1-finding.html", help="Where to write the visualization")
+    sanitize_group = parser.add_mutually_exclusive_group()
+    sanitize_group.add_argument(
+        "--sanitize",
+        dest="sanitize",
+        action="store_true",
+        default=None,
+        help="Mask real account IDs/ARNs/project IDs in the export, even for a non-docs/ output path",
+    )
+    sanitize_group.add_argument(
+        "--no-sanitize",
+        dest="sanitize",
+        action="store_false",
+        help="Force raw (unmasked) output even if --output resolves under docs/ -- use deliberately",
+    )
     args = parser.parse_args()
+
+    output_path = Path(args.output).resolve()
+    heading_to_docs = "docs" in output_path.parts
+    if args.sanitize is None:
+        sanitize = heading_to_docs
+    else:
+        sanitize = args.sanitize
+        if heading_to_docs and not sanitize:
+            print(
+                f"WARNING: --output ({output_path}) resolves under docs/ but --no-sanitize was passed -- "
+                "writing RAW output with real identifiers. This must be sanitized before anything under "
+                "docs/ is committed or published (SCOPE.md rule 5)."
+            )
 
     print(f"Loading AWS graph from {args.aws_graph}")
     aws_nodes, aws_edges = load_graph(args.aws_graph)
@@ -105,7 +139,13 @@ def main():
     print("\nRunning correlation engine...")
     nodes, edges, advisory_notes = correlate(nodes, edges)
     print(f"  Post-correlation: {len(nodes)} nodes, {len(edges)} edges")
-    print(f"  {len(advisory_notes)} advisory notes (MEDIUM-confidence, needs manual review)")
+    # LOW confidence, not MEDIUM: these are federation edges with no real
+    # structural evidence (a naming coincidence, or a condition that
+    # doesn't narrow the subject at all) -- correlation.py never promotes
+    # them into the traversal graph at all, so they can't produce a
+    # finding. MEDIUM confidence (e.g. Track 1's org-only-scoped provider)
+    # IS included in scoring; see docs/THREAT_MODEL.md #4.
+    print(f"  {len(advisory_notes)} advisory notes (LOW-confidence, hygiene notes only -- not scored)")
 
     print("Running escalation rule engine...")
     result = run_all(nodes, edges)
@@ -136,9 +176,12 @@ def main():
         print(f"  {p} (risk_weight={p.total_risk_weight:.2f})")
         highlight_ids.update(p.node_ids)
 
-    print(f"\nExporting visualization to {args.output}")
-    export_graph(nodes, edges, output_path=args.output, highlight_node_ids=highlight_ids)
-    print("Done. Remember: do not copy this file into docs/ until sanitization is confirmed.")
+    print(f"\nExporting visualization to {output_path} (sanitize={sanitize})")
+    export_graph(nodes, edges, output_path=output_path, highlight_node_ids=highlight_ids, sanitize=sanitize)
+    if sanitize:
+        print("Done. Real account IDs/ARNs/project IDs masked (src/sanitize.py).")
+    else:
+        print("Done. RAW output -- real identifiers are NOT masked. Do not commit or publish this file as-is.")
 
 
 if __name__ == "__main__":

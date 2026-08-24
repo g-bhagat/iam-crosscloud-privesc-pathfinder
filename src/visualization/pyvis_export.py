@@ -4,9 +4,11 @@ pyvis_export.py -- task 12
 Exports a correlated identity graph to an interactive HTML visualization
 via pyvis. Meant for two audiences: the analyst exploring findings
 locally, and sanitized screenshots for the portfolio site (docs/) --
-callers are responsible for sanitizing node/edge attributes (real account
-IDs, ARNs, project IDs) before anything generated here is published,
-per SCOPE.md rule 5. Nothing in this module does that sanitization itself.
+pass `sanitize=True` to mask real account IDs, ARNs, and project IDs
+(via src/sanitize.py) before anything reaches the output file, per
+SCOPE.md rule 5. Defaults to False (raw output) because a raw export is
+still the right choice for the analyst's own local inspection -- this
+module doesn't force sanitization, callers publishing anywhere decide.
 
 Visual encoding:
   - node color = cloud (AWS orange, GCP blue, Azure teal, cross-cloud
@@ -27,6 +29,7 @@ from pathlib import Path
 from pyvis.network import Network
 
 from ..graph_schema import Cloud, Edge, Node
+from ..sanitize import sanitize_graph
 
 CLOUD_COLOR = {
     Cloud.AWS: "#FF9900",
@@ -48,14 +51,26 @@ def export_graph(
     output_path: str | Path,
     highlight_node_ids: set[str] | None = None,
     title: str = "Cross-Cloud IAM Privilege Escalation Graph",
+    sanitize: bool = False,
 ) -> Path:
     """
     Render `nodes`/`edges` (post correlation.correlate(), ideally) to an
     interactive HTML file at `output_path`. `highlight_node_ids` -- e.g.
     the node_ids of an EscalationPath from pathfinder.py -- get a thick red
     border so a specific finding is visually traceable.
+
+    sanitize: if True, mask real account IDs/ARNs/project IDs (see
+        src/sanitize.py) before anything is written out. Pass
+        `highlight_node_ids` computed from the SAME (pre-sanitize) nodes
+        you're passing in here -- this function translates them through
+        the same mapping internally, so they still match after
+        sanitization changes the node IDs.
     """
     highlight_node_ids = highlight_node_ids or set()
+
+    if sanitize:
+        nodes, edges, sanitizer = sanitize_graph(nodes, edges)
+        highlight_node_ids = {sanitizer.sanitize_text(nid) for nid in highlight_node_ids}
 
     net = Network(
         height="850px",
