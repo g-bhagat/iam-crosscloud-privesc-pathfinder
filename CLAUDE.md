@@ -35,10 +35,11 @@ they are the source of truth for scope and sequencing, not this file.
 ## Structure
 
 - `src/graph_schema.py` — unified node/edge schema shared across all collectors
-- `src/collectors/` — AWS (real), GCP (stub, needs implementation), Azure (stub, deferred)
+- `src/collectors/` — AWS (real), GCP (real), Azure (stub, deferred)
 - `src/analysis/` — correlation engine, confidence scoring, escalation rule engine, pathfinder (tasks 9-11)
 - `src/visualization/` — pyvis graph export (task 12)
 - `sample_data/`, `scripts/generate_sample_graph.py`, `scripts/run_pipeline_demo.py` — synthetic Track 1-shaped fixture + end-to-end demo, used to validate tasks 9-12 without live sandbox credentials
+- `scripts/run_gcp_collector.py` — run `GCPCollector` against a real project; meant to be run locally where ADC is already set up, not from this sandboxed session
 - `tests/` — pytest suite for the analysis layer
 - `terraform/track1/` — AWS + GCP sandbox infra for Track 1 (tasks 13-18); written, not yet applied/validated against live accounts
 - `terraform/scanner/` — the tool's own least-privilege read-only scanner policy (task 5, AWS half); written, not yet applied
@@ -68,7 +69,31 @@ output — without needing a live account. That work caught and fixed a
 real pre-existing bug: `_parse_trust_policy`'s federated-principal loop
 never captured the trust policy's `Condition` block, so every AWS-side
 `FEDERATES_WITH` edge would have scored LOW confidence and been silently
-dropped. Still blocked on external setup, not code: create the dedicated
-AWS + GCP sandbox accounts (tasks 3–4) and apply the scanner credential
-Terraform against them (task 5) — full live-account validation of tasks 7
-and the analysis layer still depends on that.
+dropped.
+
+`GCPCollector` (task 8) is now also implemented for real — service
+accounts (+ user-managed-key detection), per-SA IAM bindings
+(`roles/iam.workloadIdentityUser` → `FEDERATES_WITH` with the literal
+`attributeCondition` CEL string passed through untouched;
+`serviceAccountTokenCreator`/`serviceAccountUser` → `CAN_IMPERSONATE`/
+`CAN_PASS_ROLE`), Workload Identity Pool/provider bridging (one bridge
+node per distinct OIDC issuer, mirroring the AWS-side OIDC-provider fix),
+and Cloud Asset Inventory-based `is_admin` flagging. No moto-equivalent
+exists for GCP, so it's validated via `tests/test_gcp_collector.py`
+(mocks built against the real `google-cloud-asset`/
+`google-api-python-client` response shapes, introspected from the
+installed libraries rather than assumed) plus an extended
+`tests/test_collector_correlation_integration.py` case that runs *both*
+real collectors' output through the full correlation → escalation-rules
+→ pathfinder pipeline. This session has no real GCP credentials either
+(confirmed the same way as AWS: `CLOUDSDK_AUTH_ACCESS_TOKEN` is another
+agent-proxy placeholder), and `gcloud`/its download hosts are blocked by
+this session's egress policy, so live validation against the actual
+sandbox project — `scripts/run_gcp_collector.py` — hasn't happened from
+here; that's meant to be run locally where ADC/impersonation already
+works.
+
+Still blocked on external setup, not code: create the dedicated AWS +
+GCP sandbox accounts (tasks 3–4) and apply the scanner credential
+Terraform against them (task 5) — full live-account validation of tasks
+7-8 and the analysis layer still depends on that.

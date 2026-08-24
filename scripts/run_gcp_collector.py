@@ -3,7 +3,11 @@
 run_gcp_collector.py
 
 Manual test of GCPCollector (task 8) against the real GCP sandbox
-project, using the impersonated read-only scanner service account.
+project, using the impersonated read-only scanner service account --
+not sample data. Run this before wiring GCP into the full detection
+pipeline (run_detector.py), to catch real-world API quirks (pagination,
+missing fields, permission edge cases) that sample_data/sample_graph.json
+can never surface.
 
 Written against a specific, already-validated sandbox layout:
   - WIF pool: github-actions-pool
@@ -11,18 +15,24 @@ Written against a specific, already-validated sandbox layout:
   - Service accounts: track1-owner-sa (roles/owner), track1-scoped-sa (roles/viewer)
 See TASKS.md Track 1 / docs/THREAT_MODEL.md Pattern 1 for the full design.
 
-NOTE: as of this writing, GCPCollector's constructor and internals are
-being implemented (task 8) -- the asset_client wiring below reflects
-the module's documented plan (google.cloud.asset_v1), not a confirmed
-final signature. Adjust the constructor call if the real implementation
-lands differently.
+The "sandbox-specific checks" section below is a quick pass/fail read
+against that known layout -- if your sandbox uses different names,
+those checks just won't match anything and print [MISSING]; the raw
+node/edge listing above them is unaffected.
 
 Usage:
     python3 scripts/run_gcp_collector.py --project PROJECT_ID
+    python3 scripts/run_gcp_collector.py --project PROJECT_ID --dump-json /tmp/gcp_graph.json
 
 Requires:
     gcloud auth application-default login \\
       --impersonate-service-account=iam-pathfinder-scanner@PROJECT_ID.iam.gserviceaccount.com
+
+Credentials: asset_v1.AssetServiceClient() resolves ADC automatically
+with no explicit credentials argument. The IAM Admin API v1 client
+(googleapiclient.discovery) is built explicitly with
+google.auth.default()'s credentials -- the standard, unambiguous
+pattern for discovery-based clients.
 """
 
 import argparse
@@ -32,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.collectors.gcp_collector import GCPCollector  # noqa: E402
+from src.collectors.gcp_collector import GCPCollector
 
 EXPECTED_LOOSE_PROVIDER = "gh-loose-org-scope"
 EXPECTED_SCOPED_PROVIDER = "gh-scoped-repo-branch"
@@ -53,25 +63,19 @@ def main():
     print(f"Scanning GCP project: {args.project}\n")
 
     try:
+        import google.auth
         from google.cloud import asset_v1
-
-        asset_client = asset_v1.AssetServiceClient()
-    except ImportError:
-        print(
-            "google-cloud-asset not installed. Add it to requirements.txt: "
-            "pip install google-cloud-asset --break-system-packages",
-            file=sys.stderr,
-        )
+        from googleapiclient.discovery import build
+    except ImportError as e:
+        print(f"Missing GCP client library: {e}. pip install -r requirements.txt", file=sys.stderr)
         sys.exit(1)
 
-    collector = GCPCollector(asset_client=asset_client, project_id=args.project)
+    credentials, _default_project = google.auth.default()
+    asset_client = asset_v1.AssetServiceClient()
+    iam_client = build("iam", "v1", credentials=credentials, static_discovery=True)
 
-    try:
-        nodes, edges = collector.collect()
-    except NotImplementedError as e:
-        print(f"GCPCollector is still a stub: {e}")
-        print("Expected until task 8 lands -- check back once Claude Code confirms it's done.")
-        sys.exit(1)
+    collector = GCPCollector(asset_client=asset_client, iam_client=iam_client, project_id=args.project)
+    nodes, edges = collector.collect()
 
     print(f"Collected {len(nodes)} nodes, {len(edges)} edges\n")
 
@@ -106,29 +110,29 @@ def main():
     else:
         print(f"  [MISSING] {EXPECTED_SCOPED_SA} not found in collected nodes")
 
-    # Print the raw attribute_condition for both providers if the collector
-    # captured them -- this is the exact string confidence.py's
-    # score_gcp_condition() will parse. Seeing it here raw, before
-    # correlation runs, is the clearest way to confirm the collector
-    # captured it correctly rather than reformatting or dropping it.
-    print(f"\n--- WIF provider attribute_condition (raw, as captured) ---")
+    # The raw attributeCondition CEL string lives on the FEDERATES_WITH
+    # EDGE (Edge.condition), not on a node attribute -- that's what
+    # confidence.py's score_gcp_condition() reads. Printed here, before
+    # correlation runs, as the clearest way to confirm the collector
+    # captured it untouched rather than reformatting or dropping it.
+    print("\n--- WIF provider attribute_condition (raw, as captured on each FEDERATES_WITH edge) ---")
     found_conditions = False
-    for n in nodes:
-        cond = n.attributes.get("attribute_condition") or n.attributes.get("condition")
-        if cond:
-            found_conditions = True
-            which = (
-                "LOOSE (planted misconfig)"
-                if EXPECTED_LOOSE_PROVIDER in n.name
-                else "SCOPED (negative control)"
-                if EXPECTED_SCOPED_PROVIDER in n.name
-                else "unknown provider"
-            )
-            print(f"  [{which}] {n.name}")
-            print(f"      {cond}")
+    for e in edges:
+        if e.type.value != "federates_with" or not e.condition:
+            continue
+        found_conditions = True
+        which = (
+            "LOOSE (planted misconfig)"
+            if EXPECTED_LOOSE_PROVIDER in (e.evidence or "")
+            else "SCOPED (negative control)"
+            if EXPECTED_SCOPED_PROVIDER in (e.evidence or "")
+            else "unknown provider"
+        )
+        print(f"  [{which}] {e.source} -> {e.target}")
+        print(f"      {e.condition}")
     if not found_conditions:
-        print("  None found on any node -- check whether GCPCollector stores this as a node")
-        print("  attribute or only on the edge (see confidence.py's expected input shape).")
+        print("  None found on any FEDERATES_WITH edge -- check whether any SA has a")
+        print("  roles/iam.workloadIdentityUser binding the collector could resolve.")
 
     if args.dump_json:
         out = {
