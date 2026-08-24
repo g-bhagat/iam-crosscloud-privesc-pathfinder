@@ -14,6 +14,7 @@ from moto import mock_aws
 
 from src.collectors.aws_collector import AWSCollector
 from src.graph_schema import Cloud, EdgeType, NodeType
+from src.visualization.pyvis_export import export_graph
 
 OIDC_CREATE_URL = "https://token.actions.githubusercontent.com"
 # AWS's real GetOpenIDConnectProvider API returns Url WITHOUT the scheme,
@@ -125,3 +126,60 @@ def test_collect_handles_zero_oidc_providers(aws_session, account_id):
     collector = AWSCollector(aws_session, account_id=account_id)
     nodes, _edges = collector.collect()
     assert not any(n.id.startswith("federated:") for n in nodes)
+
+
+def test_aws_managed_policy_attachment_gets_a_real_node_and_edge(monkeypatch, tmp_path):
+    """Regression test for a real bug: _collect_identity_policies() created
+    a HAS_POLICY edge for every attached policy, but only
+    _collect_managed_policies() created policy NODES -- and only for
+    Scope="Local" (customer-managed) policies. An AWS-managed policy (the
+    kind every service-linked role has by design, and the one used here,
+    AdministratorAccess) got an edge pointing at a node that was never
+    created. pyvis_export correctly drops an edge with a missing endpoint
+    at render time, but _nodes_with_any_edge() doesn't check node
+    existence -- so the role would still count as "connected" and survive
+    isolated-node filtering while rendering with zero actual edges,
+    indistinguishable from a genuinely isolated node without being
+    flagged as one.
+
+    Uses a real AWS-managed policy ARN (not moto's default-empty managed
+    policy catalog) via MOTO_IAM_LOAD_MANAGED_POLICIES=true, confirmed
+    against the installed moto version's settings.py.
+    """
+    monkeypatch.setenv("MOTO_IAM_LOAD_MANAGED_POLICIES", "true")
+    with mock_aws():
+        session = boto3.Session(region_name="us-east-1")
+        account_id = session.client("sts").get_caller_identity()["Account"]
+        iam = session.client("iam")
+        iam.create_role(
+            RoleName="managed-only-role",
+            AssumeRolePolicyDocument=json.dumps({"Version": "2012-10-17", "Statement": []}),
+        )
+        iam.attach_role_policy(RoleName="managed-only-role", PolicyArn="arn:aws:iam::aws:policy/AdministratorAccess")
+
+        collector = AWSCollector(session, account_id=account_id)
+        nodes, edges = collector.collect()
+
+        role_id = next(n.id for n in nodes if n.name == "managed-only-role")
+        policy_node = next((n for n in nodes if n.type == NodeType.POLICY and n.name == "AdministratorAccess"), None)
+        assert policy_node is not None, "AWS-managed attached policy must get a real node, not just an edge target"
+        assert policy_node.attributes["arn"] == "arn:aws:iam::aws:policy/AdministratorAccess"
+
+        has_policy_edges = [e for e in edges if e.source == role_id and e.type == EdgeType.HAS_POLICY]
+        assert len(has_policy_edges) == 1
+        assert has_policy_edges[0].target == policy_node.id
+
+        # Both endpoints are real nodes -- the edge is genuinely renderable,
+        # not silently dropped by pyvis_export's missing-endpoint check.
+        node_ids = {n.id for n in nodes}
+        assert has_policy_edges[0].source in node_ids
+        assert has_policy_edges[0].target in node_ids
+
+        # And it shows up that way through the actual render pipeline, not
+        # just in the raw node/edge lists: not hidden by the default
+        # isolated-node filter, and its HAS_POLICY edge to the policy node
+        # is present in the output.
+        out_path = export_graph(nodes, edges, tmp_path / "graph.html")
+        html = out_path.read_text()
+        assert "managed-only-role" in html
+        assert "AdministratorAccess" in html
