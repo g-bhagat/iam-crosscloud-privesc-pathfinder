@@ -201,6 +201,23 @@ class AWSCollector:
 
         for p in attached:
             policy_id = self._node_id("policy", p["PolicyArn"])
+            # Create the policy node here, not just in
+            # _collect_managed_policies() -- that sweep only lists
+            # Scope="Local" (customer-managed) policies, so an AWS-managed
+            # policy (e.g. every service-linked role's attached policy, or
+            # AdministratorAccess itself) would otherwise never get a node
+            # at all. The HAS_POLICY edge below would then point at a node
+            # that doesn't exist: pyvis_export correctly drops an edge with
+            # a missing endpoint at render time, but _nodes_with_any_edge()
+            # doesn't check node existence, so the role would still count
+            # as "connected" and survive isolated-node filtering while
+            # rendering with zero actual edges -- indistinguishable from a
+            # real isolated node without being flagged as one.
+            if policy_id not in self.nodes:
+                self.nodes[policy_id] = Node(
+                    id=policy_id, type=NodeType.POLICY, cloud=Cloud.AWS, name=p["PolicyName"],
+                    attributes={"arn": p["PolicyArn"]},
+                )
             self.edges.append(Edge(node_id, policy_id, EdgeType.HAS_POLICY, Cloud.AWS))
             if p["PolicyName"] in ADMIN_MARKERS:
                 self.nodes[node_id].is_admin = True
@@ -225,7 +242,16 @@ class AWSCollector:
         self._emit_sensitive_edges(node_id, all_actions)
 
     def _collect_managed_policies(self):
-        """Ensure standalone policy nodes exist even if not yet referenced."""
+        """Ensure standalone customer-managed (Scope="Local") policy nodes
+        exist even if no identity currently has them attached.
+        _collect_identity_policies() already creates a policy node -- Local
+        or AWS-managed -- for every policy it finds actually attached to an
+        identity, so this sweep's remaining job is narrower than the name
+        suggests: it only ever adds a node here for a Local policy that
+        exists but isn't (yet) attached to anyone. AWS owns the entire
+        AWS-managed policy catalog, so there's no equivalent "list every
+        AWS-managed policy in case it's unattached" case worth collecting --
+        an unattached AWS-managed policy isn't a fact about this account."""
         paginator = self.iam.get_paginator("list_policies")
         for page in paginator.paginate(Scope="Local"):  # customer-managed only; Scope="All" for AWS-managed too
             for p in page["Policies"]:
