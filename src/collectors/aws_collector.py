@@ -3,7 +3,8 @@ aws_collector.py
 
 Live AWS IAM collector. Read-only: only calls List*/Get* IAM APIs
 (iam:List*, iam:Get*, sts:GetCallerIdentity). Requires only the
-`ReadOnlyAccess` or a scoped IAM-read policy on the credentials used.
+`ReadOnlyAccess` or a scoped IAM-read policy on the credentials used --
+see terraform/scanner/aws.tf for the exact least-privilege action list.
 
 What it builds:
 - USER, ROLE, GROUP, POLICY nodes for every identity in the account
@@ -15,6 +16,16 @@ What it builds:
   edges, inferred by scanning each identity's effective policy documents
   for the specific IAM actions that enable known privilege-escalation
   techniques (see analysis/escalation_rules.py for the technique list).
+- OIDC provider (APP_REGISTRATION/CROSS_CLOUD) nodes, listed and read
+  directly via iam:ListOpenIDConnectProviders + iam:GetOpenIDConnectProvider
+  -- independent of whether any role's trust policy currently references
+  them. `_parse_trust_policy` alone only ever sees the bare ARN string
+  embedded in a Federated principal; it can't tell you the provider's
+  issuer URL, audience/client ID list, thumbprints, or creation date, and
+  it never surfaces a provider that exists but isn't (yet) trusted by any
+  role. `_collect_oidc_providers` fills both gaps and enriches the same
+  `federated:<arn>` node `_parse_trust_policy` creates, rather than
+  duplicating it.
 
 This intentionally does NOT attempt to fully evaluate IAM policy semantics
 (that's a much bigger undertaking -- see AWS's own policy simulator, or
@@ -73,6 +84,10 @@ class AWSCollector:
         logger.info("Collecting AWS IAM identities for account %s", self.account_id)
         self._collect_users()
         self._collect_groups()
+        # Before _collect_roles(): so trust-policy parsing enriches an
+        # already-populated OIDC provider node (via setdefault) instead of
+        # creating a bare one with no metadata.
+        self._collect_oidc_providers()
         self._collect_roles()
         self._collect_managed_policies()
         return list(self.nodes.values()), self.edges
@@ -123,6 +138,54 @@ class AWSCollector:
                 self._collect_identity_policies(node_id, "role", r["RoleName"])
                 # parse trust policy -> CAN_ASSUME edges from whoever is trusted
                 self._parse_trust_policy(node_id, r["RoleName"], r.get("AssumeRolePolicyDocument"))
+
+    def _collect_oidc_providers(self):
+        """
+        List + read every IAM OIDC provider resource directly
+        (iam:ListOpenIDConnectProviders, iam:GetOpenIDConnectProvider) --
+        not paginated; AWS caps accounts at 100 providers, well under a
+        single call's limit.
+
+        Uses the same `federated:<arn>` node id `_parse_trust_policy`
+        creates for a role's Federated principal, so the two collection
+        paths land on one node instead of two: whichever runs first
+        creates it, the other enriches it. This is what actually captures
+        provider-level metadata (issuer URL, audience/client ID list,
+        thumbprints, creation date) -- `_parse_trust_policy` alone only
+        ever sees the bare ARN string a trust policy happens to reference,
+        and never sees a provider that no role currently trusts at all.
+        """
+        try:
+            providers = self.iam.list_open_id_connect_providers().get("OpenIDConnectProviderList", [])
+        except Exception as e:
+            logger.warning("Could not list OIDC providers: %s", e)
+            return
+
+        for p in providers:
+            arn = p["Arn"]
+            try:
+                detail = self.iam.get_open_id_connect_provider(OpenIDConnectProviderArn=arn)
+            except Exception as e:
+                logger.warning("Could not read OIDC provider %s: %s", arn, e)
+                continue
+
+            node_id = f"federated:{arn}"
+            node = self.nodes.get(node_id)
+            if node is None:
+                node = Node(
+                    id=node_id, type=NodeType.APP_REGISTRATION, cloud=Cloud.CROSS_CLOUD,
+                    name=arn, external_facing=True,
+                )
+                self.nodes[node_id] = node
+
+            node.attributes.update({
+                "arn": arn,
+                "issuer_url": detail.get("Url", ""),
+                "client_id_list": detail.get("ClientIDList", []),
+                "thumbprint_list": detail.get("ThumbprintList", []),
+                "created": str(detail.get("CreateDate", "")),
+                "tags": detail.get("Tags", []),
+            })
 
     def _collect_identity_policies(self, node_id: str, kind: str, name: str):
         """Attach HAS_POLICY edges + scan policy docs for sensitive actions."""
@@ -236,6 +299,12 @@ class AWSCollector:
             if isinstance(federated, str):
                 federated = [federated]
 
+            # Computed once per statement (not per-principal): both the
+            # AWS-principal loop and the federated loop below need it, and
+            # a trust policy statement's Condition block applies uniformly
+            # to every principal within that statement.
+            condition = json.dumps(stmt.get("Condition")) if stmt.get("Condition") else None
+
             for p in aws_principals:
                 if p == "*":
                     # extremely dangerous: anyone can assume this role
@@ -250,7 +319,6 @@ class AWSCollector:
                     self.nodes.setdefault(src_id, Node(
                         id=src_id, type=NodeType.ROLE, cloud=Cloud.AWS, name=p,
                     ))
-                condition = json.dumps(stmt.get("Condition")) if stmt.get("Condition") else None
                 self.edges.append(Edge(
                     source=src_id, target=role_node_id, type=EdgeType.CAN_ASSUME,
                     cloud=Cloud.AWS, condition=condition,
@@ -262,6 +330,11 @@ class AWSCollector:
                 # OIDC/SAML federation -- this is a cross-cloud bridge point
                 # (e.g. GitHub Actions OIDC, GCP Workload Identity Federation,
                 # Azure AD as SAML IdP). Flag it distinctly.
+                #
+                # For an OIDC provider, `f` is the provider ARN and this
+                # node id matches the one _collect_oidc_providers() uses --
+                # setdefault here means whichever of the two ran first wins
+                # the initial (bare) node, and the other only enriches it.
                 src_id = f"federated:{f}"
                 self.nodes.setdefault(src_id, Node(
                     id=src_id, type=NodeType.APP_REGISTRATION, cloud=Cloud.CROSS_CLOUD,
@@ -269,6 +342,7 @@ class AWSCollector:
                 ))
                 self.edges.append(Edge(
                     source=src_id, target=role_node_id, type=EdgeType.FEDERATES_WITH,
-                    cloud=Cloud.CROSS_CLOUD, evidence="OIDC/SAML federated trust",
+                    cloud=Cloud.CROSS_CLOUD, condition=condition,
+                    evidence="OIDC/SAML federated trust",
                     risk_weight=0.7,
                 ))

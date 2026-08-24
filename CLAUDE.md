@@ -41,6 +41,7 @@ they are the source of truth for scope and sequencing, not this file.
 - `sample_data/`, `scripts/generate_sample_graph.py`, `scripts/run_pipeline_demo.py` — synthetic Track 1-shaped fixture + end-to-end demo, used to validate tasks 9-12 without live sandbox credentials
 - `tests/` — pytest suite for the analysis layer
 - `terraform/track1/` — AWS + GCP sandbox infra for Track 1 (tasks 13-18); written, not yet applied/validated against live accounts
+- `terraform/scanner/` — the tool's own least-privilege read-only scanner policy (task 5, AWS half); written, not yet applied
 - `docs/` — the public portfolio site (GitHub Pages, served from here)
 - `SCOPE.md`, `TASKS.md` — read these first, always
 
@@ -56,8 +57,18 @@ against a synthetic Track 1-shaped graph (`sample_data/sample_graph.json`,
 GCP WIF provider → `roles/owner` SA) and the true negative (correctly
 scoped control) at the correlation + rule-engine + pathfinder level.
 Track 1 Terraform (`terraform/track1/`) is also written but not yet
-applied. Still blocked on external setup, not code: create the dedicated
-AWS + GCP sandbox accounts and their least-privilege read-only
-credentials (tasks 3–5) — `AWSCollector` can't run against a real account
-(task 7) and `GCPCollector` can't be implemented for real (task 8) until
-those exist; the analysis layer's real-data validation depends on both.
+applied. `AWSCollector` now also collects OIDC provider resources
+directly (`iam:ListOpenIDConnectProviders`/`iam:GetOpenIDConnectProvider`,
+added to `terraform/scanner/aws.tf`'s least-privilege policy) rather than
+only inferring them from role trust policies, and a moto-mocked test
+suite (`tests/test_aws_collector.py`,
+`tests/test_collector_correlation_integration.py`) validates it — and
+the correlation/rule-engine layer against its real (not hand-crafted)
+output — without needing a live account. That work caught and fixed a
+real pre-existing bug: `_parse_trust_policy`'s federated-principal loop
+never captured the trust policy's `Condition` block, so every AWS-side
+`FEDERATES_WITH` edge would have scored LOW confidence and been silently
+dropped. Still blocked on external setup, not code: create the dedicated
+AWS + GCP sandbox accounts (tasks 3–4) and apply the scanner credential
+Terraform against them (task 5) — full live-account validation of tasks 7
+and the analysis layer still depends on that.

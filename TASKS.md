@@ -21,9 +21,9 @@ to end against real sandbox data.
 - [x] 2. Write the threat model doc (trust boundaries, 5 escalation paths, correlation confidence tiers) — done (`docs/THREAT_MODEL.md`)
 - [ ] 3. Create a dedicated AWS free-tier sandbox account
 - [ ] 4. Create a dedicated GCP free-tier project
-- [ ] 5. Create a least-privilege, read-only scanning credential in each cloud
+- [ ] 5. Create a least-privilege, read-only scanning credential in each cloud — AWS policy written (`terraform/scanner/aws.tf`), not applied; GCP side not started
 - [x] 6. `graph_schema.py` — done
-- [ ] 7. Get `AWSCollector` running against the real sandbox account, debug against live API responses
+- [ ] 7. Get `AWSCollector` running against the real sandbox account, debug against live API responses — validated against a moto-mocked AWS account (`tests/test_aws_collector.py`, `tests/test_collector_correlation_integration.py`); real sandbox validation still pending task 3
 - [ ] 8. Implement `GCPCollector` for real (currently a stub — biggest remaining engineering chunk)
 - [x] 9. Build the correlation engine (`FEDERATES_WITH` edge detector + 3-tier confidence logic) — done (`src/analysis/correlation.py`, `src/analysis/confidence.py`), validated against synthetic Track 1-shaped data (`sample_data/sample_graph.json`); real-data validation still pending tasks 7-8
 - [x] 10. Build the escalation rule engine (encode the 5 patterns as graph-pattern checks) — done (`src/analysis/escalation_rules.py`); Patterns 1-2 implemented, Patterns 3-5 stubbed as deferred per SCOPE.md
