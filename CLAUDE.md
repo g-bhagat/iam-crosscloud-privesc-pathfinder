@@ -38,8 +38,10 @@ they are the source of truth for scope and sequencing, not this file.
 - `src/collectors/` — AWS (real), GCP (real), Azure (stub, deferred)
 - `src/analysis/` — correlation engine, confidence scoring, escalation rule engine, pathfinder (tasks 9-11)
 - `src/visualization/` — pyvis graph export (task 12)
+- `src/sanitize.py` — masks real account IDs/ARNs/project IDs before anything reaches a published export; `pyvis_export.export_graph(..., sanitize=True)` opts in
 - `sample_data/`, `scripts/generate_sample_graph.py`, `scripts/run_pipeline_demo.py` — synthetic Track 1-shaped fixture + end-to-end demo, used to validate tasks 9-12 without live sandbox credentials
-- `scripts/run_gcp_collector.py` — run `GCPCollector` against a real project; meant to be run locally where ADC is already set up, not from this sandboxed session
+- `scripts/run_aws_collector.py`, `scripts/run_gcp_collector.py` — run each real collector against its real sandbox; meant to be run locally where real credentials/ADC are already set up, not from this sandboxed session
+- `scripts/run_detector.py` — task 19's real-data pipeline (both collectors' JSON dumps → correlation → escalation rules → pathfinder → pyvis export); auto-sanitizes whenever `--output` resolves under `docs/`
 - `tests/` — pytest suite for the analysis layer
 - `terraform/track1/` — AWS + GCP sandbox infra for Track 1 (tasks 13-18); written, not yet applied/validated against live accounts
 - `terraform/scanner/` — the tool's own least-privilege read-only scanner policy (task 5, AWS half); written, not yet applied
@@ -92,6 +94,19 @@ this session's egress policy, so live validation against the actual
 sandbox project — `scripts/run_gcp_collector.py` — hasn't happened from
 here; that's meant to be run locally where ADC/impersonation already
 works.
+
+The sanitization gap `pyvis_export.py`'s docstring used to just flag as
+"callers' responsibility" is now closed: `src/sanitize.py` masks real
+AWS account IDs/ARNs and GCP project IDs/numbers (deterministic,
+run-local pseudonymization — the same real value maps to the same
+placeholder everywhere in one call, so a sanitized graph stays
+internally consistent and edges still resolve to the right nodes).
+`export_graph(..., sanitize=True)` opts in; `scripts/run_detector.py`
+forces it on automatically whenever `--output` resolves under `docs/`,
+rather than relying on remembering a flag, with `--no-sanitize` as a
+deliberate override. Scope is narrow on purpose — only the three
+identifier classes SCOPE.md rule 5 names, not resource/role/SA names or
+GitHub org/repo, which are meant to stay visible in the case study.
 
 Still blocked on external setup, not code: create the dedicated AWS +
 GCP sandbox accounts (tasks 3–4) and apply the scanner credential
