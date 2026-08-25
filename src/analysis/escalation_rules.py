@@ -13,7 +13,24 @@ pretend otherwise:
                                                 (validated once Track 2
                                                  sandbox infra exists,
                                                  TASKS.md task 27/28)
-  Pattern 3 (mirror AWS-trusts-GCP)            DEFERRED (documented only)
+  Pattern 3 (mirror AWS-trusts-GCP)            IMPLEMENTED  -- same
+                                                check_pattern2_* function,
+                                                opposite direction; its
+                                                matching logic only ever
+                                                keyed off source.cloud !=
+                                                target.cloud, not which
+                                                specific cloud was which,
+                                                so it already fired
+                                                correctly and only needed
+                                                a direction-aware
+                                                pattern_id/pattern_name on
+                                                the Finding it emits. No
+                                                third demonstrated use
+                                                case per SCOPE.md's
+                                                deferral rationale -- that
+                                                was about case-study
+                                                depth, not detection
+                                                coverage.
   Pattern 4 (static credential leakage)        DEFERRED (documented only,
                                                 genuinely different
                                                 capability -- secrets
@@ -128,20 +145,40 @@ def check_pattern1_cicd_oidc_mismatch(nodes: dict[str, Node], edges: list[Edge])
 
 
 # ---------------------------------------------------------------------------
-# Pattern 2 -- overly-broad GCP WIF trust of an AWS principal (Track 2)
+# Patterns 2 & 3 -- overly-broad direct cross-cloud trust, either direction
+# (Track 2: GCP-target; Pattern 3: AWS-target, mirror direction)
 # ---------------------------------------------------------------------------
+
+# Direction-specific labeling for the one shared shape below. GCP-target
+# keeps the original pattern 2 identity (Track 2); AWS-target is pattern 3,
+# the mirror direction SCOPE.md documents but defers as a *demonstrated use
+# case* -- not a detection gap, so it's labeled and reported like any other
+# implemented pattern rather than routed through DEFERRED_PATTERNS.
+_DIRECTION_LABELS = {
+    Cloud.GCP: (2, "Overly-broad GCP WIF trust of an AWS principal"),
+    Cloud.AWS: (3, "Overly-broad AWS trust of a GCP principal"),
+}
 
 
 def check_pattern2_gcp_wif_overbroad_aws_trust(nodes: dict[str, Node], edges: list[Edge]) -> list[Finding]:
     """
-    Shape: a DIRECT FEDERATES_WITH edge (no third-party bridge node) from an
-    AWS-cloud-typed source into a GCP target, where correlation.py's
-    merge_direct_references() resolved (or failed to fully resolve) the
-    trust down to less than a specific role ARN -- i.e. a MEDIUM-confidence
-    direct edge. Implemented now per task 9/10's general scope; end-to-end
-    validation against real Track 2 sandbox data is TASKS.md tasks 27-28,
-    since that infra doesn't exist yet (see terraform/track1/README.md --
-    Track 2 reuses Track 1's infra once built).
+    Shape: a DIRECT FEDERATES_WITH edge (no third-party bridge node) between
+    an AWS-cloud-typed node and a GCP-cloud-typed node, where
+    correlation.py's merge_direct_references() resolved (or failed to fully
+    resolve) the trust down to less than a specific role ARN -- i.e. a
+    MEDIUM-confidence direct edge. Direction-agnostic on purpose: the match
+    only ever keys off source.cloud != target.cloud, never which specific
+    cloud is source vs. target, so it fires identically for a GCP WIF
+    provider trusting an AWS principal (pattern 2, Track 2) and for an AWS
+    OIDC provider trusting a GCP principal (pattern 3, the mirror
+    direction) -- `_DIRECTION_LABELS` picks the right pattern_id/name for
+    whichever direction actually fired. Implemented now per task 9/10's
+    general scope; end-to-end validation against real Track 2 sandbox data
+    is TASKS.md tasks 27-28, since that infra doesn't exist yet (see
+    terraform/track1/README.md -- Track 2 reuses Track 1's infra once
+    built). Pattern 3 has no dedicated sandbox scenario built either (see
+    SCOPE.md's deferral rationale), but that's about case-study depth, not
+    detection coverage -- the same code path already covers it.
     """
     findings: list[Finding] = []
 
@@ -164,10 +201,11 @@ def check_pattern2_gcp_wif_overbroad_aws_trust(nodes: dict[str, Node], edges: li
         if confidence != Confidence.MEDIUM:
             continue  # HIGH-confidence direct edges are correctly-scoped controls, not findings
 
+        pattern_id, pattern_name = _DIRECTION_LABELS[target.cloud]
         findings.append(
             Finding(
-                pattern_id=2,
-                pattern_name="Overly-broad GCP WIF trust of an AWS principal",
+                pattern_id=pattern_id,
+                pattern_name=pattern_name,
                 severity=Severity.CRITICAL,
                 confidence=confidence,
                 source_node=source.id,
@@ -192,20 +230,34 @@ def check_pattern2_gcp_wif_overbroad_aws_trust(nodes: dict[str, Node], edges: li
 # ---------------------------------------------------------------------------
 
 DEFERRED_PATTERNS = [
-    (3, "Mirror-direction AWS-trusts-GCP", "Same detection logic as Pattern 2, opposite trust direction -- low incremental value as a 3rd case (SCOPE.md)."),
     (4, "Static credential leakage across the cloud boundary", "Genuinely different capability (secrets/content scanning, not policy-graph traversal) -- future extension."),
     (5, "DR/failover identity + cross-cloud SSO deprovisioning gap", "Needs a shared upstream IdP federated to both clouds -- no sandbox infra for this exists."),
 ]
 
 
+# check_pattern2_gcp_wif_overbroad_aws_trust covers BOTH pattern_id 2 and 3
+# in one rule (direction-aware via _DIRECTION_LABELS) -- registered once
+# here, not twice, since one call to the function already checks both
+# directions in the same edge scan.
 RULES = [
     (1, "CI/CD OIDC trust mismatch", RuleStatus.IMPLEMENTED, check_pattern1_cicd_oidc_mismatch),
-    (2, "Overly-broad GCP WIF trust of an AWS principal", RuleStatus.IMPLEMENTED, check_pattern2_gcp_wif_overbroad_aws_trust),
+    (
+        2,
+        "Overly-broad direct cross-cloud trust (pattern 2: GCP-target / pattern 3: AWS-target)",
+        RuleStatus.IMPLEMENTED,
+        check_pattern2_gcp_wif_overbroad_aws_trust,
+    ),
 ]
 
 
 def run_all(nodes: list[Node], edges: list[Edge]) -> RuleResult:
-    """Run every IMPLEMENTED rule against a correlated graph; record skips for deferred ones."""
+    """
+    Run every IMPLEMENTED rule against a correlated graph; record skips for
+    deferred ones. Pattern 3 is no longer one of those skips -- it shares
+    check_pattern2_gcp_wif_overbroad_aws_trust's rule entry and reports
+    under its own pattern_id/pattern_name via each Finding it emits, not
+    via a RULES entry of its own or a DEFERRED_PATTERNS reason.
+    """
     node_map = {n.id: n for n in nodes}
     result = RuleResult()
 
@@ -213,7 +265,11 @@ def run_all(nodes: list[Node], edges: list[Edge]) -> RuleResult:
         if status is not RuleStatus.IMPLEMENTED:
             continue
         found = fn(node_map, edges)
-        logger.info("Pattern %d (%s): %d finding(s)", pattern_id, name, len(found))
+        found_pattern_ids = sorted({f.pattern_id for f in found})
+        logger.info(
+            "Rule %r (pattern %d): %d finding(s), pattern id(s) emitted: %s",
+            name, pattern_id, len(found), found_pattern_ids or "none",
+        )
         result.findings.extend(found)
 
     for pattern_id, name, reason in DEFERRED_PATTERNS:
