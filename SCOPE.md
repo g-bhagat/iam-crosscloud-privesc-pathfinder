@@ -58,6 +58,22 @@ is in scope. Azure is explicitly out of scope for implementation (see
   - **Track 1**: CI/CD OIDC trust mismatch between AWS and GCP
   - **Track 2**: overly-broad GCP Workload Identity Federation trust of
     an AWS principal
+  - **Track 3**: mirror-direction AWS-trusts-GCP escalation — an AWS
+    role's trust policy accepts tokens from Google's OIDC issuer
+    (AWS outbound identity federation) too broadly, letting a
+    GCP service account assume an AWS admin-equivalent role. Un-deferred
+    from the original scope (see "Reversed decisions" below). Note on
+    framing: this is NOT the structurally cross-cloud-necessary case —
+    an AWS-only tool can determine this role's `is_admin` status and
+    read its own trust condition using only AWS-native data, same
+    limitation as Track 1's GCP-side check, just mirrored. Its value is
+    narrower and more honest: it's a distinct, less commonly audited
+    misconfiguration class (AWS's newer outbound federation feature),
+    and it completes the secure/insecure combination matrix across both
+    trust directions rather than testing only one. The only pattern in
+    this project that is structurally cross-cloud-necessary — where
+    neither single cloud's own data contains any reference to the
+    other cloud's trust at all — is Track 1's third-party-bridge shape.
 - Escalation rule engine, pathfinder, and remediation output for both
   tracks
 - A public-facing case study (portfolio site) presenting sanitized
@@ -67,18 +83,48 @@ is in scope. Azure is explicitly out of scope for implementation (see
 
 - **Azure** — no implementation, due to lack of a currently-validated
   Azure test environment. Documented at the methodology level only.
-- **Mirror-direction AWS-trusts-GCP escalation** — same underlying
-  detection logic as Track 2; low incremental value as a third
-  demonstrated case.
 - **Static credential leakage across the cloud boundary** — a distinct
   capability (secrets/content scanning vs. policy-graph traversal),
   better suited to a future extension.
 - **DR/failover and cross-cloud SSO deprovisioning gaps** — deferred for
   sandbox-complexity reasons (multi-region setup / requires a real IdP
   tenant federated to both clouds).
+- **Compound/chained scenarios** (both clouds independently misconfigured
+  from the same originating identity, potentially producing a single
+  multi-hop path rather than two separate findings) — real, worth
+  testing via the synthetic scenario script before deciding whether it
+  needs new sandbox infrastructure or a code change to the pathfinder.
+  Not yet scheduled as a track.
 - Any data-plane access analysis (S3 object contents, GCS bucket
   contents, etc.) — this project analyzes identity and permission
   structure, not data exposure.
+
+## Reversed decisions
+
+Scope decisions in this project are not permanent once written — this
+section exists so a reversal is visible and explained, not silently
+absorbed into the "in scope" list as if it had always been there.
+
+- **Mirror-direction AWS-trusts-GCP (now Track 3), reversed 2026-08-25,
+  reasoning corrected same day.** Originally deferred as low incremental
+  value, then un-deferred based on a claim that didn't hold up: that
+  Track 3 was the structurally cross-cloud-necessary case (target
+  privilege only knowable from AWS's data). On closer inspection, an
+  AWS-only tool can determine an AWS role's `is_admin` status and read
+  its own trust condition using only AWS-native data — the same
+  limitation Track 1's GCP-side check has, just mirrored. General rule:
+  a trust policy's target is always a resource native to whichever
+  cloud defines that policy, so "does this condition lead somewhere
+  privileged" is answerable from the policy-defining cloud's own data
+  alone, regardless of direction. Track 3 stays in scope for a
+  narrower, honest reason: it's a distinct, less-audited
+  misconfiguration class (AWS's newer outbound identity federation),
+  and it completes the secure/insecure test matrix across both trust
+  directions instead of only one. The only pattern here that is
+  genuinely structurally necessary — where neither cloud's own data
+  contains any reference to the other cloud's trust at all — is
+  Track 1's third-party-bridge shape (GitHub, trusted independently by
+  both clouds, correlated via `merge_oidc_bridges`).
 
 ## Success criteria
 
