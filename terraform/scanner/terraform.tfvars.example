@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and fill in your sandbox values.
+# terraform.tfvars is gitignored -- never commit it (SCOPE.md rule 5: no
+# real account IDs / project IDs in anything committed to this repo).
+
+aws_region = "us-east-1"
+
+# Your dedicated GCP sandbox project ID (task 4) -- never a real/prod project.
+gcp_project_id = "your-sandbox-project-id"
+gcp_region     = "us-central1"
+
+gcp_scanner_service_account_id = "iam-pathfinder-scanner"
+
+# The human GCP account (or CI identity) that will impersonate the scanner
+# SA to run GCPCollector. No default -- required.
+gcp_scanner_operator_email = "you@example.com"
