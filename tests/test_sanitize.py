@@ -211,6 +211,33 @@ def test_sanitize_graph_masks_gcp_collector_track2_synthetic_node():
     assert sanitized.attributes["aws_account_id"] == node_id_placeholder
 
 
+def test_sanitize_graph_masks_gcp_human_user_node_email_attribute():
+    """GCPCollector's human-user-node readability fix shortens `name` to
+    the email's local part (e.g. "gopilalbhagat9"), keeping the full
+    email on `id` (unchanged) and attributes["email"]. sanitize_node()
+    must still mask the full email everywhere it actually appears --
+    id and attributes["email"] -- even though `name` no longer duplicates
+    it. The short `name` itself is NOT expected to be masked (same
+    treatment as any other short display label, e.g. a role or SA name)
+    -- this test locks in that division of labor, not just that nothing
+    crashes."""
+    node = Node(
+        id="gcp:user:gopilalbhagat9@gmail.com",
+        type=NodeType.USER,
+        cloud=Cloud.GCP,
+        name="gopilalbhagat9",
+        attributes={"email": "gopilalbhagat9@gmail.com"},
+    )
+    new_nodes, _new_edges, _sanitizer = sanitize_graph([node], [])
+    sanitized = new_nodes[0]
+    assert "gopilalbhagat9@gmail.com" not in sanitized.id
+    assert "gopilalbhagat9@gmail.com" not in sanitized.attributes["email"]
+    assert sanitized.id.startswith("gcp:user:")
+    # The id and the attribute must resolve to the SAME placeholder.
+    id_placeholder = sanitized.id.split(":", 2)[-1]
+    assert sanitized.attributes["email"] == id_placeholder
+
+
 def test_sanitize_graph_masks_list_attributes():
     """merged_from (correlation.py's bridge-merge bookkeeping) is a list of
     the OLD pre-merge node ids, which embed the same real identifiers."""

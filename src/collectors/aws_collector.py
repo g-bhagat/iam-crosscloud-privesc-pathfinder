@@ -319,6 +319,29 @@ class AWSCollector:
             return set()
 
     @staticmethod
+    def _short_principal_name(arn_or_id: str) -> str:
+        """Extract a short display name from an AWS principal string --
+        the resource part of an ARN (e.g. "admin" from
+        "arn:aws:iam::123456789012:user/admin", "SomeRole" from
+        ".../role/path/to/SomeRole"), matching every other node type in
+        the graph (role name, SA email, username -- short label, full
+        detail in `attributes`). Falls back to the string unchanged when
+        it isn't ARN-shaped at all (a trust policy can name a bare
+        account ID as an AWS principal, with no better short name to
+        extract)."""
+        if not arn_or_id.startswith("arn:aws"):
+            return arn_or_id
+        # ARN resource component is everything after the 5th colon --
+        # "arn:partition:service:region:account:resource" -- which may
+        # itself use "/" (user/admin, role/path/to/SomeRole) or further
+        # ":" separators depending on service; take the last "/"-segment
+        # of whatever's left, so a path-prefixed role's display name is
+        # just its role name, not the full path.
+        parts = arn_or_id.split(":", 5)
+        resource = parts[5] if len(parts) == 6 else arn_or_id
+        return resource.rsplit("/", 1)[-1]
+
+    @staticmethod
     def _extract_actions(doc: dict) -> set[str]:
         actions = set()
         statements = doc.get("Statement", [])
@@ -382,7 +405,9 @@ class AWSCollector:
                 else:
                     src_id = self._node_id("principal", p)
                     self.nodes.setdefault(src_id, Node(
-                        id=src_id, type=NodeType.ROLE, cloud=Cloud.AWS, name=p,
+                        id=src_id, type=NodeType.ROLE, cloud=Cloud.AWS,
+                        name=self._short_principal_name(p),
+                        attributes={"arn": p},
                     ))
                 self.edges.append(Edge(
                     source=src_id, target=role_node_id, type=EdgeType.CAN_ASSUME,

@@ -473,7 +473,24 @@ class GCPCollector:
         if member.startswith("user:"):
             email = member.split(":", 1)[1]
             node_id = f"gcp:user:{email}"
-            return self.nodes.setdefault(node_id, Node(id=node_id, type=NodeType.USER, cloud=Cloud.GCP, name=email))
+            return self.nodes.setdefault(
+                node_id,
+                Node(
+                    id=node_id,
+                    type=NodeType.USER,
+                    cloud=Cloud.GCP,
+                    # Short display name (the email's local part), matching
+                    # every other node type in the graph -- short label,
+                    # full detail in `attributes`. The full email still
+                    # lives on `id` (unchanged) and attributes["email"],
+                    # so sanitize.py's human-email masking (which operates
+                    # on `id`/attributes, not `name`) is unaffected: it
+                    # still finds and masks the real address, it just
+                    # never sees it duplicated into `name`.
+                    name=email.split("@", 1)[0],
+                    attributes={"email": email},
+                ),
+            )
         if member.startswith("group:"):
             email = member.split(":", 1)[1]
             node_id = f"gcp:group:{email}"
