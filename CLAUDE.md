@@ -44,6 +44,8 @@ they are the source of truth for scope and sequencing, not this file.
 - `scripts/run_detector.py` — task 19's real-data pipeline (both collectors' JSON dumps → correlation → escalation rules → pathfinder → pyvis export); auto-sanitizes whenever `--output` resolves under `docs/`
 - `tests/` — pytest suite for the analysis layer
 - `terraform/track1/` — AWS + GCP sandbox infra for Track 1 (tasks 13-18); written, not yet applied/validated against live accounts
+- `terraform/track2/` — GCP-trusts-AWS-directly sandbox infra for Track 2 (tasks 24-30); formalizes infra already manually built and live-validated (real token exchange, real Finding fired) — written, not yet applied from this repo's Terraform
+- `terraform/track3/` — AWS-trusts-GCP-directly sandbox infra for Track 3 (tasks 35-39); same status as track2 — formalizes already-validated manual infra, not yet applied from this repo's Terraform
 - `terraform/scanner/` — the tool's own least-privilege read-only scanner policy (task 5, AWS half); written, not yet applied
 - `docs/` — the public portfolio site (GitHub Pages, served from here)
 - `SCOPE.md`, `TASKS.md` — read these first, always
@@ -112,3 +114,28 @@ Still blocked on external setup, not code: create the dedicated AWS +
 GCP sandbox accounts (tasks 3–4) and apply the scanner credential
 Terraform against them (task 5) — full live-account validation of tasks
 7-8 and the analysis layer still depends on that.
+
+Track 2 (`terraform/track2/`) and Track 3 (`terraform/track3/`)
+Terraform now exist too — both formalize sandbox infrastructure that was
+already manually built, debugged, and validated live outside this repo
+(real AWS↔GCP token exchanges succeeded, real Findings fired through the
+actual detection pipeline) into the same file structure as
+`terraform/track1/`. Not yet applied from this Terraform specifically
+(same caveat as track1). A number of real bugs surfaced during that live
+validation and are already fixed in `src/` with regression tests: the
+AWS-type-provider branch of `GCPCollector._emit_workload_identity_edge`
+emitting nothing at all; `AWSCollector`'s Federated-principal bridge
+nodes all being classified `CROSS_CLOUD` even for `accounts.google.com`
+(GCP's own identity system, not a third party); `confidence.py`'s
+`score_gcp_condition()` having no pattern for AWS ARNs/accounts at all;
+and a couple of node-label/sanitization follow-ups. `TASKS.md`'s
+checkboxes for tasks 24-30/35-39 stay unchecked until this Terraform is
+actually applied and re-validated from here, per the same convention
+`terraform/track1/` already established.
+
+**Note for whoever picks this up next**: this "Current status" section
+is accurate as a running log but has grown long and increasingly
+incomplete relative to the full session-by-session history — treat
+`TASKS.md` checkboxes as the authoritative source of truth on what's
+actually done, and git log / this file's own accumulated paragraphs as
+the "why," not the other way around.
