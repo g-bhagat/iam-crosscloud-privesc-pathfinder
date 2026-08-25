@@ -26,7 +26,9 @@ that's a deliberate scope change to this module, not an oversight.
 
 Approach: deterministic, run-local pseudonymization via regex matched
 against the *structural* patterns these values actually appear in (an
-ARN's account-ID field, a `projects/<id>/` path segment, a
+ARN's account-ID field, GCPCollector's `aws:external_account:<id>`
+synthetic-node id and its "account <id>" node name -- see
+gcp_collector.py's Track 2 fix -- a `projects/<id>/` path segment, a
 `...@<project>.iam.gserviceaccount.com` email domain, a bare
 `local@domain` email) -- not a blanket "looks like a long alphanumeric
 token" guess, which would false-positive on ordinary resource names.
@@ -51,6 +53,20 @@ from typing import Any
 from .graph_schema import Edge, Node
 
 _AWS_ARN_ACCOUNT_RE = re.compile(r"(arn:aws[a-z0-9-]*:[a-z0-9-]+:[a-z0-9-]*:)(\d{12})(:)")
+# GCPCollector's synthetic "any AWS principal in this account" node/edge
+# shapes (see gcp_collector.py's _emit_workload_identity_edge, Track 2's
+# AWS-type-provider fix) -- an AWS account ID appearing outside an ARN
+# entirely, so it needs its own structural patterns rather than reusing
+# _AWS_ARN_ACCOUNT_RE. Three shapes, in increasing order of how little
+# context surrounds the digits: the node id's "aws:external_account:"
+# prefix, the node name's "...account <id>" phrasing, and the bare
+# attributes["aws_account_id"] value (nothing but the 12 digits, hence
+# fully anchored -- deliberately NOT a blanket embedded-digits search,
+# which would risk false-positiving on an unrelated 12-digit number
+# elsewhere in some other attribute).
+_AWS_EXTERNAL_ACCOUNT_NODE_RE = re.compile(r"(aws:external_account:)(\d{12})")
+_AWS_ACCOUNT_ID_IN_PHRASE_RE = re.compile(r"(\baccount )(\d{12})\b")
+_AWS_ACCOUNT_ID_BARE_RE = re.compile(r"^(\d{12})$")
 _GCP_PROJECT_PATH_RE = re.compile(r"(projects/)([a-zA-Z0-9][a-zA-Z0-9-]{3,29})(?=/|$)")
 _GCP_SA_EMAIL_RE = re.compile(r"([a-zA-Z0-9-]+)@([a-zA-Z0-9-]+)\.iam\.gserviceaccount\.com")
 # General "local@domain.tld" shape, for a plain human user email (a
@@ -116,6 +132,13 @@ class GraphSanitizer:
         text = _AWS_ARN_ACCOUNT_RE.sub(
             lambda m: m.group(1) + self._aws_account_placeholder(m.group(2)) + m.group(3), text
         )
+        text = _AWS_EXTERNAL_ACCOUNT_NODE_RE.sub(
+            lambda m: m.group(1) + self._aws_account_placeholder(m.group(2)), text
+        )
+        text = _AWS_ACCOUNT_ID_IN_PHRASE_RE.sub(
+            lambda m: m.group(1) + self._aws_account_placeholder(m.group(2)), text
+        )
+        text = _AWS_ACCOUNT_ID_BARE_RE.sub(lambda m: self._aws_account_placeholder(m.group(1)), text)
         text = _GCP_PROJECT_PATH_RE.sub(lambda m: m.group(1) + self._gcp_project_placeholder(m.group(2)), text)
         text = _GCP_SA_EMAIL_RE.sub(
             lambda m: f"{m.group(1)}@{self._gcp_project_placeholder(m.group(2))}.iam.gserviceaccount.com", text
