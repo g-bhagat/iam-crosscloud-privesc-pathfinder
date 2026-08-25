@@ -215,12 +215,15 @@ def test_sanitize_graph_masks_gcp_human_user_node_email_attribute():
     """GCPCollector's human-user-node readability fix shortens `name` to
     the email's local part (e.g. "gopilalbhagat9"), keeping the full
     email on `id` (unchanged) and attributes["email"]. sanitize_node()
-    must still mask the full email everywhere it actually appears --
-    id and attributes["email"] -- even though `name` no longer duplicates
-    it. The short `name` itself is NOT expected to be masked (same
-    treatment as any other short display label, e.g. a role or SA name)
-    -- this test locks in that division of labor, not just that nothing
-    crashes."""
+    must mask the full email everywhere it actually appears -- id and
+    attributes["email"] -- AND must mask `name` too: the local part of a
+    human's email is itself identifying (unlike a role/SA short name),
+    so it can't be left visible just because it's no longer a full
+    local@domain.tld string. This is a regression test: an earlier
+    version of this fix left `name` unmasked, since sanitize_text's
+    email regex structurally can't recognize a bare local part as an
+    email -- confirmed empirically ("gopilalbhagat9" stayed visible in
+    sanitized output even though id/attributes were correctly masked)."""
     node = Node(
         id="gcp:user:gopilalbhagat9@gmail.com",
         type=NodeType.USER,
@@ -232,10 +235,35 @@ def test_sanitize_graph_masks_gcp_human_user_node_email_attribute():
     sanitized = new_nodes[0]
     assert "gopilalbhagat9@gmail.com" not in sanitized.id
     assert "gopilalbhagat9@gmail.com" not in sanitized.attributes["email"]
+    assert "gopilalbhagat9" not in sanitized.name
     assert sanitized.id.startswith("gcp:user:")
-    # The id and the attribute must resolve to the SAME placeholder.
+    # id, attributes["email"], and name must all resolve to the SAME
+    # placeholder -- not just each individually masked, but consistent
+    # with each other.
     id_placeholder = sanitized.id.split(":", 2)[-1]
     assert sanitized.attributes["email"] == id_placeholder
+    assert sanitized.name == id_placeholder.split("@", 1)[0]
+
+
+def test_sanitize_node_masks_name_directly_not_just_via_sanitize_graph():
+    """Direct GraphSanitizer().sanitize_node() call, matching the exact
+    empirical repro: a node with name="gopilalbhagat9",
+    attributes={"email": "gopilalbhagat9@gmail.com"} must come back with
+    `name` genuinely masked, not just id/attributes -- the previous test
+    suite exercised sanitize_graph() but apparently never asserted on
+    `name` specifically for this node shape, which is exactly how this
+    regression slipped through."""
+    s = GraphSanitizer()
+    node = Node(
+        id="gcp:user:gopilalbhagat9@gmail.com",
+        type=NodeType.USER,
+        cloud=Cloud.GCP,
+        name="gopilalbhagat9",
+        attributes={"email": "gopilalbhagat9@gmail.com"},
+    )
+    sanitized = s.sanitize_node(node)
+    assert sanitized.name != "gopilalbhagat9"
+    assert "gopilalbhagat9" not in sanitized.name
 
 
 def test_sanitize_graph_masks_list_attributes():

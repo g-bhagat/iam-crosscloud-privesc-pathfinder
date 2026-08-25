@@ -34,7 +34,13 @@ gcp_collector.py's Track 2 fix -- a `projects/<id>/` path segment, a
 token" guess, which would false-positive on ordinary resource names.
 The human-email pattern runs last and explicitly skips anything already
 ending in `.iam.gserviceaccount.com`, so it never re-masks output the
-GCP-SA-email pattern already produced. The same real value maps to the
+GCP-SA-email pattern already produced. One exception to "sanitize_text
+handles every field": a NodeType.USER node's `name` is the email's local
+part, not a full address (see gcp_collector.py's _member_to_node) --
+_HUMAN_EMAIL_RE structurally can't recognize a bare local part as an
+email, so sanitize_node() special-cases that combination and derives
+the masked name from the already-sanitized attributes["email"] instead
+of running sanitize_text on name directly. The same real value maps to the
 same placeholder everywhere it appears within one `sanitize_graph()`
 call, so a sanitized graph stays internally consistent (the same AWS
 account still looks like the same account throughout, edges still
@@ -50,7 +56,7 @@ import re
 from dataclasses import replace
 from typing import Any
 
-from .graph_schema import Edge, Node
+from .graph_schema import Edge, Node, NodeType
 
 _AWS_ARN_ACCOUNT_RE = re.compile(r"(arn:aws[a-z0-9-]*:[a-z0-9-]+:[a-z0-9-]*:)(\d{12})(:)")
 # GCPCollector's synthetic "any AWS principal in this account" node/edge
@@ -156,11 +162,28 @@ class GraphSanitizer:
         return value  # bool/int/float/None etc. -- nothing to mask
 
     def sanitize_node(self, n: Node) -> Node:
+        attributes = {k: self._sanitize_value(v) for k, v in n.attributes.items()}
+
+        name = self.sanitize_text(n.name)
+        if n.type == NodeType.USER and "email" in n.attributes:
+            # A human-user node's `name` is the email's local part
+            # (gcp_collector.py's _member_to_node derives it that way),
+            # not a full local@domain.tld string -- _HUMAN_EMAIL_RE can't
+            # recognize a bare local part as an email at all, so
+            # sanitize_text(n.name) alone would leave it unmasked even
+            # while the email itself gets masked everywhere else. Instead,
+            # derive the masked name from the ALREADY-sanitized email
+            # attribute the same way the collector derived the
+            # unsanitized one, so they stay consistent (e.g.
+            # "sanitized-user-1" next to "sanitized-user-1@example.com",
+            # not the real local part next to a masked email).
+            name = attributes["email"].split("@", 1)[0]
+
         return replace(
             n,
             id=self.sanitize_text(n.id),
-            name=self.sanitize_text(n.name),
-            attributes={k: self._sanitize_value(v) for k, v in n.attributes.items()},
+            name=name,
+            attributes=attributes,
         )
 
     def sanitize_edge(self, e: Edge) -> Edge:
