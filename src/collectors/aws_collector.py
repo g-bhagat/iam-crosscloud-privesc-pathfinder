@@ -16,16 +16,23 @@ What it builds:
   edges, inferred by scanning each identity's effective policy documents
   for the specific IAM actions that enable known privilege-escalation
   techniques (see analysis/escalation_rules.py for the technique list).
-- OIDC provider (APP_REGISTRATION/CROSS_CLOUD) nodes, listed and read
-  directly via iam:ListOpenIDConnectProviders + iam:GetOpenIDConnectProvider
-  -- independent of whether any role's trust policy currently references
-  them. `_parse_trust_policy` alone only ever sees the bare ARN string
-  embedded in a Federated principal; it can't tell you the provider's
-  issuer URL, audience/client ID list, thumbprints, or creation date, and
-  it never surfaces a provider that exists but isn't (yet) trusted by any
-  role. `_collect_oidc_providers` fills both gaps and enriches the same
-  `federated:<arn>` node `_parse_trust_policy` creates, rather than
-  duplicating it.
+- OIDC provider (APP_REGISTRATION, normally CROSS_CLOUD) nodes, listed
+  and read directly via iam:ListOpenIDConnectProviders +
+  iam:GetOpenIDConnectProvider -- independent of whether any role's
+  trust policy currently references them. `_parse_trust_policy` alone
+  only ever sees the bare ARN string embedded in a Federated principal;
+  it can't tell you the provider's issuer URL, audience/client ID list,
+  thumbprints, or creation date, and it never surfaces a provider that
+  exists but isn't (yet) trusted by any role. `_collect_oidc_providers`
+  fills both gaps and enriches the same `federated:<arn>` node
+  `_parse_trust_policy` creates, rather than duplicating it. Exception:
+  a Federated principal naming one of AWS's built-in web identity
+  providers (a bare host string, not an ARN -- see
+  AWS_BUILTIN_FEDERATED_PROVIDER_CLOUD) is never an
+  iam:ListOpenIDConnectProviders resource at all, and when it's
+  accounts.google.com specifically, its bridge node is classified
+  cloud=Cloud.GCP rather than CROSS_CLOUD -- Track 3's mechanism, see
+  `_parse_trust_policy`'s federated-principal loop for why.
 
 This intentionally does NOT attempt to fully evaluate IAM policy semantics
 (that's a much bigger undertaking -- see AWS's own policy simulator, or
@@ -62,6 +69,38 @@ SENSITIVE_ACTIONS = {
 
 ADMIN_MARKERS = {
     "AdministratorAccess",  # AWS managed policy name
+}
+
+# AWS's built-in (legacy, pre-OIDC-provider-resource) Federated principal
+# shorthand for a small hardcoded set of natively recognized web identity
+# providers -- see AWS's AssumeRoleWithWebIdentity docs. Written as a bare
+# host string in a trust policy's Federated principal (e.g. "Federated":
+# "accounts.google.com"), NOT an ARN referencing a manually-registered
+# IAM OIDC provider resource -- that ARN form is the genuine third-party
+# case (GitHub Actions, GitLab, or any other OIDC issuer someone
+# registered), correctly classified CROSS_CLOUD below.
+#
+# Of these, only accounts.google.com maps to a cloud this project
+# models: it IS GCP's own identity system, not an unrelated third party,
+# so an AWS role trusting it directly is Track 3's actual mechanism (AWS
+# outbound federation to Google) -- and it needs to be classified
+# cloud=Cloud.GCP, not CROSS_CLOUD, or check_pattern2/3's
+# `source.cloud in (Cloud.AWS, Cloud.GCP)` check can never recognize it
+# as a direct cross-cloud trust; it would only ever show up as a bare
+# pathfinder path, never a named Finding with severity/MITRE mapping.
+# www.amazon.com, graph.facebook.com, and cognito-identity.amazonaws.com
+# are the same AWS mechanism's other built-in providers -- real, and
+# worth knowing this dict exists for, but out of this project's AWS+GCP
+# scope, so deliberately left unmapped here: they fall through to the
+# default CROSS_CLOUD classification below, same as any other genuine
+# third party.
+AWS_BUILTIN_FEDERATED_PROVIDER_CLOUD = {
+    "accounts.google.com": Cloud.GCP,
+    # "www.amazon.com": out of scope (no Cloud.AMAZON)
+    # "graph.facebook.com": out of scope (no Cloud.FACEBOOK)
+    # "cognito-identity.amazonaws.com": out of scope (an AWS-native
+    #     service acting as an identity broker, not a foreign cloud's
+    #     identity system)
 }
 
 
@@ -361,9 +400,25 @@ class AWSCollector:
                 # node id matches the one _collect_oidc_providers() uses --
                 # setdefault here means whichever of the two ran first wins
                 # the initial (bare) node, and the other only enriches it.
+                #
+                # `f` can ALSO be a bare host string (no ARN at all) for
+                # one of AWS's built-in web identity providers -- see
+                # AWS_BUILTIN_FEDERATED_PROVIDER_CLOUD above. When it's
+                # accounts.google.com specifically, the bridge node IS
+                # GCP's own identity system, not a third party independent
+                # of both clouds, so it's classified cloud=Cloud.GCP
+                # rather than the CROSS_CLOUD default every other
+                # Federated principal (a real third-party OIDC issuer)
+                # gets. This also correctly excludes it from
+                # correlation.merge_oidc_bridges(), which only ever
+                # touches CROSS_CLOUD nodes -- there is no GCP-side
+                # counterpart to merge this with (GCP has no resource
+                # representing "AWS trusts my own issuer"); this node is
+                # already the final, resolved one.
                 src_id = f"federated:{f}"
+                bridge_cloud = AWS_BUILTIN_FEDERATED_PROVIDER_CLOUD.get(f, Cloud.CROSS_CLOUD)
                 self.nodes.setdefault(src_id, Node(
-                    id=src_id, type=NodeType.APP_REGISTRATION, cloud=Cloud.CROSS_CLOUD,
+                    id=src_id, type=NodeType.APP_REGISTRATION, cloud=bridge_cloud,
                     name=f, external_facing=True,
                 ))
                 self.edges.append(Edge(

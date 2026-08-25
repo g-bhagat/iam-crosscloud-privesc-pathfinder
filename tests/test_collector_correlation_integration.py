@@ -342,3 +342,72 @@ def test_real_aws_and_real_gcp_collectors_produce_a_true_positive_finding():
     paths = find_escalation_paths(merged_nodes, merged_edges, external_facing_only=True)
     assert any(p.target == owner_id for p in paths)
     assert not any(p.target == scoped_id for p in paths)
+
+
+def test_real_aws_collector_output_produces_track3_true_positive_finding():
+    """Regression test for a real bug: _parse_trust_policy classified
+    EVERY Federated principal's bridge node as CROSS_CLOUD, including
+    AWS's built-in bare-string shorthand for accounts.google.com --
+    which IS GCP's own identity system, not a third party unrelated to
+    both clouds. check_pattern2/3 requires source.cloud in (Cloud.AWS,
+    Cloud.GCP) to recognize a direct cross-cloud trust, so a CROSS_CLOUD
+    source could never satisfy it: Track 3 could only ever surface as a
+    bare pathfinder path, never a named Finding with severity/MITRE
+    mapping. No GCPCollector involved -- confirmed against real Track 3
+    infrastructure, this is entirely an AWS-side artifact (AWS's
+    outbound federation to Google's issuer), same as GCPCollector's
+    Track 2 fix needed no AWSCollector.
+
+    Real Track 3 misconfiguration shape: a trust condition that checks
+    the audience but never pins accounts.google.com:sub to one specific
+    GCP principal -- scores MEDIUM (real federation, unpinned subject),
+    exactly what check_pattern2/3 requires to flag it."""
+    with mock_aws():
+        session = boto3.Session(region_name="us-east-1")
+        iam = session.client("iam")
+        account_id = session.client("sts").get_caller_identity()["Account"]
+
+        trust_doc = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Federated": "accounts.google.com"},
+                    "Action": "sts:AssumeRoleWithWebIdentity",
+                    "Condition": {
+                        "StringEquals": {"accounts.google.com:oaud": "https://sts.amazonaws.com/track3-role"}
+                    },
+                }
+            ],
+        }
+        iam.create_role(RoleName="track3-admin-role", AssumeRolePolicyDocument=json.dumps(trust_doc))
+        # ADMIN_MARKERS matches on PolicyName alone, so a customer-managed
+        # policy named "AdministratorAccess" is enough to flag is_admin --
+        # no need for moto's (env-var-gated) real managed-policy catalog.
+        admin_policy_arn = iam.create_policy(
+            PolicyName="AdministratorAccess",
+            PolicyDocument=json.dumps({"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}),
+        )["Policy"]["Arn"]
+        iam.attach_role_policy(RoleName="track3-admin-role", PolicyArn=admin_policy_arn)
+
+        aws_nodes, aws_edges = AWSCollector(session, account_id=account_id).collect()
+
+    merged_nodes, merged_edges, advisories = correlate(aws_nodes, aws_edges)
+    assert not advisories, "an unpinned-subject federation condition is real federation (MEDIUM), not a LOW-confidence guess"
+
+    bridge = next(n for n in merged_nodes if n.id == "federated:accounts.google.com")
+    assert bridge.cloud == Cloud.GCP
+
+    federates = [e for e in merged_edges if e.type == EdgeType.FEDERATES_WITH]
+    assert len(federates) == 1
+    assert federates[0].attributes["confidence"] == Confidence.MEDIUM.value
+
+    result = run_all(merged_nodes, merged_edges)
+    admin_role_id = next(n.id for n in merged_nodes if "track3-admin-role" in n.name)
+    pattern3 = [f for f in result.findings if f.pattern_id == 3]
+    assert len(pattern3) == 1
+    assert pattern3[0].target_node == admin_role_id
+    assert pattern3[0].pattern_name == "Overly-broad AWS trust of a GCP principal"
+
+    paths = find_escalation_paths(merged_nodes, merged_edges, external_facing_only=True)
+    assert any(p.target == admin_role_id for p in paths), "must be a real pathfinder path, not just a Finding"
