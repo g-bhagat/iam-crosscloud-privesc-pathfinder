@@ -117,38 +117,80 @@ def score_aws_condition(condition_json: str | None) -> Confidence:
     return Confidence.MEDIUM
 
 
-def score_gcp_condition(attribute_condition: str | None) -> Confidence:
+def score_gcp_condition(attribute_condition: str | None, aws_account_id: str | None = None) -> Confidence:
     """
     Score a GCP Workload Identity Federation provider's CEL
     `attribute_condition` string.
 
-    HIGH:   checks `assertion.repository ==` (and ideally `assertion.ref
-            ==`) -- pinned to one repo (+ branch).
-    MEDIUM: checks only `assertion.repository_owner ==` (org-level) or
-            an AWS account-ID-only match with no role ARN condition --
-            this is the Track 1 / Track 2 planted-misconfiguration shape.
-    LOW:    empty/missing condition, or a condition that doesn't
-            constrain the subject at all (e.g. only checks `aud`).
-    """
-    if not attribute_condition or not attribute_condition.strip():
-        return Confidence.LOW
+    aws_account_id: the WIF provider's own --account-id, when known (see
+        gcp_collector.py's AWS-type-provider branch, which stores this on
+        the edge as attributes["aws_account_id"] -- correlation.py's
+        _score_edge passes it through). An AWS-type WIF provider is
+        ALWAYS scoped to exactly one AWS account at the provider level --
+        that field is mandatory when creating one -- so "no
+        attribute_condition at all" for this kind of provider still
+        means real narrowing to one account, just expressed structurally
+        rather than in the CEL condition string. Passing this floors an
+        otherwise-LOW result to MEDIUM; it never lowers a HIGH result,
+        and it's meaningless for a GitHub-shaped provider (omit it there
+        -- for that shape, no condition genuinely means no scoping at
+        all).
 
-    cond = attribute_condition
+    HIGH:   checks `assertion.repository ==` (and ideally `assertion.ref
+            ==`) -- pinned to one repo (+ branch). Also HIGH: an AWS
+            role pinned by ARN -- `assertion.arn ==` / `assertion.role
+            ==` (exact match), or the standard
+            `assertion.arn.startsWith('arn:aws:sts::<account>:assumed-
+            role/<role-name>/')` idiom (Google's own recommended shape
+            for this, since an STS assumed-role ARN's session-name
+            suffix is dynamic and can never be pinned with `==`) --
+            Track 2's negative-control shape.
+    MEDIUM: checks only `assertion.repository_owner ==` (org-level); an
+            AWS account-ID-only match (`assertion.account ==`), or an
+            `assertion.arn.startsWith(...)` prefix that stops at the
+            account/assumed-role boundary with no role name after it --
+            both are Track 2's actual planted-misconfiguration shape,
+            real narrowing but to every principal in one account, not
+            one role; or `aws_account_id` is known and the condition
+            itself is empty or doesn't match any recognized shape (see
+            above -- real narrowing expressed at the provider level).
+    LOW:    empty/missing condition with no aws_account_id context, or a
+            condition that doesn't constrain the subject at all (e.g.
+            only checks `aud`).
+    """
+    cond = attribute_condition or ""
 
     has_ref = bool(re.search(r"assertion\.ref\s*==", cond))
     has_repo = bool(re.search(r"assertion\.repository\s*==", cond))
     has_repo_owner_only = bool(re.search(r"assertion\.repository_owner\s*==", cond)) and not has_repo
+
+    arn_exact_match = bool(re.search(r"assertion\.(arn|role)\s*==", cond))
+    # The standard idiom for pinning an STS assumed-role ARN: the
+    # session-name suffix is dynamic per-assumption, so `==` can never
+    # match one -- startsWith() up to and including a specific role name
+    # is as precise as this shape gets. A prefix that stops before/at
+    # "assumed-role/" itself (nothing after it) only narrows to the
+    # account, not a specific role.
+    starts_with_match = re.search(r"assertion\.arn\.startsWith\(\s*['\"]([^'\"]+)['\"]\s*\)", cond)
+    role_pinned_prefix = bool(starts_with_match and re.search(r"assumed-role/[^/]+/?$", starts_with_match.group(1)))
+    account_only_prefix = bool(starts_with_match) and not role_pinned_prefix
+
     # Track 2 shape: GCP trusting an AWS principal directly, scoped only
-    # to account ID with no role-ARN-level condition.
-    has_aws_account_only = bool(re.search(r"assertion\.account\s*==", cond)) and not re.search(
-        r"assertion\.(arn|role)\s*==", cond
+    # to account ID with no role-level condition.
+    has_aws_account_only = (
+        bool(re.search(r"assertion\.account\s*==", cond)) and not arn_exact_match and not role_pinned_prefix
     )
 
     if has_repo and has_ref:
         return Confidence.HIGH
-    if re.search(r"assertion\.(arn|role)\s*==", cond):
+    if arn_exact_match or role_pinned_prefix:
         return Confidence.HIGH
-    if has_repo or has_repo_owner_only or has_aws_account_only:
+    if has_repo or has_repo_owner_only or has_aws_account_only or account_only_prefix:
+        return Confidence.MEDIUM
+    if aws_account_id:
+        # No CEL condition (or nothing this function recognizes), but the
+        # provider itself is scoped to one AWS account -- real
+        # structural narrowing, not "no evidence of scoping at all".
         return Confidence.MEDIUM
 
     return Confidence.LOW

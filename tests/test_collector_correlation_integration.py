@@ -205,20 +205,33 @@ def _cai_owner_grant(project_id: str, owner_email: str):
     )
 
 
-def _real_gcp_collector_output_track2(project_id: str, pool_name: str, aws_account_id: str) -> tuple[list, list]:
+def _real_gcp_collector_output_track2(
+    project_id: str, pool_name: str, aws_account_id: str, attribute_condition: str | None = "__default__"
+) -> tuple[list, list]:
     """Real GCPCollector output for Track 2's actual mechanism: a GCP WIF
     pool trusting an AWS account directly (no third-party OIDC issuer),
-    account-only scoped (the planted misconfiguration -- real federation,
-    but the trusted principal is "anyone in this AWS account," not one
-    specific role), bound to an is_admin (roles/owner) SA. No AWSCollector
-    involved: Track 2's AWS-side "source" is entirely the synthetic
-    aws:external_account:<id> node GCPCollector itself creates."""
+    scoped only to the account (the planted misconfiguration -- real
+    federation, but the trusted principal is "anyone in this AWS
+    account," not one specific role), bound to an is_admin (roles/owner)
+    SA. No AWSCollector involved: Track 2's AWS-side "source" is entirely
+    the synthetic aws:external_account:<id> node GCPCollector itself
+    creates.
+
+    attribute_condition: defaults to an explicit `assertion.account ==`
+    CEL condition; pass None for the OTHER real Track 2 loose shape,
+    confirmed empirically against actual infrastructure -- no
+    attributeCondition at all, relying entirely on the provider's own
+    --account-id restriction (mandatory when creating an AWS-type WIF
+    provider)."""
     owner_email = f"track2-owner-sa@{project_id}.iam.gserviceaccount.com"
     owner_resource = f"projects/{project_id}/serviceAccounts/{owner_email}"
 
+    if attribute_condition == "__default__":
+        attribute_condition = f'assertion.account == "{aws_account_id}"'
+
     aws_provider = {
         "name": f"{pool_name}/providers/aws-account-only",
-        "attributeCondition": f'assertion.account == "{aws_account_id}"',
+        "attributeCondition": attribute_condition,
         "attributeMapping": {"google.subject": "assertion.arn"},
         "aws": {"accountId": aws_account_id},
     }
@@ -285,6 +298,78 @@ def test_real_gcp_collector_output_produces_track2_true_positive_finding():
 
     paths = find_escalation_paths(merged_nodes, merged_edges, external_facing_only=True)
     assert any(p.target == owner_id for p in paths)
+
+
+def test_real_gcp_collector_output_no_condition_still_produces_true_positive_finding():
+    """Regression test for a real bug: score_gcp_condition() had no
+    pattern for AWS identifiers beyond an explicit `assertion.account ==`
+    check -- confirmed empirically, the ACTUAL real Track 2 loose
+    misconfiguration sets no attributeCondition at all, relying entirely
+    on the provider's own --account-id restriction. That fell through to
+    the empty-condition LOW default, and tag_confidence() drops
+    LOW-confidence edges from the traversal graph entirely -- so this
+    exact real shape (a genuine, live-tested token exchange) was
+    invisible even after the earlier "GCPCollector emits nothing for an
+    AWS-type provider" bug was fixed. Same pipeline as the
+    explicit-condition test above, but attribute_condition=None."""
+    gcp_project_id = "iam-pathfinder-sandbox"
+    pool_name = "projects/111122223333/locations/global/workloadIdentityPools/aws-trust-pool"
+    aws_account_id = "999988887777"
+
+    gcp_nodes, gcp_edges = _real_gcp_collector_output_track2(
+        gcp_project_id, pool_name, aws_account_id, attribute_condition=None
+    )
+
+    merged_nodes, merged_edges, advisories = correlate(gcp_nodes, gcp_edges)
+    assert not advisories, (
+        "a provider scoped to one AWS account at the provider level is real federation (MEDIUM), "
+        "not a LOW-confidence guess, even with no CEL condition at all"
+    )
+
+    federates = [e for e in merged_edges if e.type == EdgeType.FEDERATES_WITH]
+    assert len(federates) == 1
+    assert federates[0].condition is None
+    assert federates[0].attributes["confidence"] == Confidence.MEDIUM.value
+
+    result = run_all(merged_nodes, merged_edges)
+    owner_id = next(n.id for n in merged_nodes if "track2-owner-sa" in n.name)
+    pattern2_targets = {f.target_node for f in result.findings if f.pattern_id == 2}
+    assert owner_id in pattern2_targets
+
+    paths = find_escalation_paths(merged_nodes, merged_edges, external_facing_only=True)
+    assert any(p.target == owner_id for p in paths)
+
+
+def test_real_gcp_collector_output_role_pinned_negative_control_not_flagged():
+    """The other half of the same real bug: without AWS-ARN recognition
+    in score_gcp_condition(), the real Track 2 negative control
+    (assertion.arn.startsWith('arn:aws:sts::<account>:assumed-role/
+    <role>/') -- pinned to one specific role, the standard idiom since an
+    STS assumed-role ARN's session-name suffix is dynamic) ALSO scored
+    LOW, same as the true positive -- the tool could not tell them apart
+    at all. Must now score HIGH and must NOT produce a pattern_id=2
+    Finding, proving the fix distinguishes the two, not just that it
+    stopped dropping edges."""
+    gcp_project_id = "iam-pathfinder-sandbox"
+    pool_name = "projects/111122223333/locations/global/workloadIdentityPools/aws-trust-pool"
+    aws_account_id = "999988887777"
+    scoped_condition = f"assertion.arn.startsWith('arn:aws:sts::{aws_account_id}:assumed-role/track2-scoped-role/')"
+
+    gcp_nodes, gcp_edges = _real_gcp_collector_output_track2(
+        gcp_project_id, pool_name, aws_account_id, attribute_condition=scoped_condition
+    )
+
+    merged_nodes, merged_edges, advisories = correlate(gcp_nodes, gcp_edges)
+    assert not advisories
+
+    federates = [e for e in merged_edges if e.type == EdgeType.FEDERATES_WITH]
+    assert len(federates) == 1
+    assert federates[0].attributes["confidence"] == Confidence.HIGH.value
+
+    result = run_all(merged_nodes, merged_edges)
+    owner_id = next(n.id for n in merged_nodes if "track2-owner-sa" in n.name)
+    pattern2_targets = {f.target_node for f in result.findings if f.pattern_id == 2}
+    assert owner_id not in pattern2_targets, "a role-pinned condition is a correctly-scoped control, not a finding"
 
 
 def test_real_aws_and_real_gcp_collectors_produce_a_true_positive_finding():
