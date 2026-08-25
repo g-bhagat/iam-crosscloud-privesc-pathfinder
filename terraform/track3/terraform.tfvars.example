@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and fill in your sandbox values.
+# terraform.tfvars is gitignored -- never commit it (SCOPE.md rule 5: no
+# real account IDs / project IDs in anything committed to this repo).
+
+aws_region           = "us-east-1"
+aws_loose_role_name  = "track3-loose-role"
+aws_scoped_role_name = "track3-scoped-role"
+
+# Your dedicated GCP sandbox project ID (task 4) -- never a real/prod project.
+gcp_project_id = "your-sandbox-project-id"
+gcp_region     = "us-central1"
+
+ordinary_service_account_id = "track3-ordinary-sa"
+
+enable_gcp_apis = true
