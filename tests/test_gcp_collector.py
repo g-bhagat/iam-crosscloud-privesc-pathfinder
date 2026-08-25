@@ -484,3 +484,42 @@ def test_aws_type_provider_produces_federates_with_edge_from_synthetic_account_n
     assert edge.source == source_id
     assert edge.condition == AWS_ACCOUNT_PROVIDER["attributeCondition"]
     assert edge.attributes["aws_account_id"] == AWS_ACCOUNT_ID
+
+
+def test_aws_type_provider_with_no_condition_still_carries_account_id(sa_list, pools):
+    """The REAL Track 2 loose misconfiguration, confirmed empirically
+    against actual infrastructure: the provider sets NO
+    attributeCondition at all, relying entirely on the provider's own
+    --account-id restriction (mandatory when creating an AWS-type WIF
+    provider) rather than an explicit CEL condition. The edge must still
+    carry aws_account_id -- that's what lets confidence.py's
+    score_gcp_condition() floor this to MEDIUM instead of LOW (see
+    tests/test_confidence.py); without it on the edge, this exact real
+    shape would score identically to "no evidence of scoping at all"."""
+    provider = dict(AWS_ACCOUNT_PROVIDER, attributeCondition=None)
+    iam_client = _build_iam_client(
+        pools=pools,
+        providers_by_pool={POOL_NAME: [provider]},
+        service_accounts=sa_list,
+        sa_policies={
+            OWNER_SA_RESOURCE: {
+                "bindings": [
+                    {
+                        "role": "roles/iam.workloadIdentityUser",
+                        "members": [
+                            f"principal://iam.googleapis.com/{POOL_NAME}/subject/"
+                            f"arn:aws:sts::{AWS_ACCOUNT_ID}:assumed-role/gha-deployer/GitHubActions"
+                        ],
+                    }
+                ]
+            },
+        },
+    )
+    collector = GCPCollector(asset_client=MagicMock(), iam_client=iam_client, project_id=PROJECT_ID)
+    nodes, edges = collector.collect()
+
+    owner_sa_id = next(n.id for n in nodes if n.name == OWNER_SA_EMAIL)
+    federates = [e for e in edges if e.type == EdgeType.FEDERATES_WITH and e.target == owner_sa_id]
+    assert len(federates) == 1
+    assert federates[0].condition is None
+    assert federates[0].attributes["aws_account_id"] == AWS_ACCOUNT_ID

@@ -77,3 +77,51 @@ def test_gcp_role_arn_pinned_is_high():
 def test_gcp_missing_condition_is_low():
     assert score_gcp_condition(None) == Confidence.LOW
     assert score_gcp_condition("   ") == Confidence.LOW
+
+
+def test_gcp_real_track2_loose_condition_is_medium_not_low():
+    """Real bug, empirically confirmed against actual Track 2 infra: the
+    real planted-misconfiguration provider sets NO attribute_condition at
+    all, relying entirely on the provider's own --account-id restriction
+    (a GCP AWS-type WIF provider is always scoped to exactly one AWS
+    account at the provider level -- that field is mandatory). Previously
+    this hit the empty-condition early return and scored LOW,
+    indistinguishable from "no evidence of scoping at all" -- and
+    tag_confidence() drops LOW edges from the traversal graph entirely,
+    so Track 2's real, live-tested true positive was invisible."""
+    assert score_gcp_condition(None, aws_account_id="123456789012") == Confidence.MEDIUM
+    assert score_gcp_condition("", aws_account_id="123456789012") == Confidence.MEDIUM
+
+
+def test_gcp_aws_account_id_without_condition_context_stays_low():
+    """Without aws_account_id, an empty condition still means "no
+    evidence of scoping at all" -- the floor only applies when the
+    caller actually knows the provider is account-scoped."""
+    assert score_gcp_condition(None) == Confidence.LOW
+    assert score_gcp_condition("") == Confidence.LOW
+
+
+def test_gcp_real_track2_scoped_role_arn_startswith_is_high():
+    """Real bug: the real Track 2 negative control uses the standard
+    startsWith() idiom to pin a specific AWS role
+    (assertion.arn.startsWith('arn:aws:sts::<account>:assumed-role/
+    <role>/')), not assertion.arn == '...' -- an STS assumed-role ARN's
+    session-name suffix is dynamic per-assumption, so `==` can never
+    match one. Previously fell through every HIGH/MEDIUM branch (no
+    pattern for `.startsWith(`) all the way to LOW, exactly like the
+    loose true positive -- the tool could not distinguish Track 2's true
+    positive from its true negative at all."""
+    cond = "assertion.arn.startsWith('arn:aws:sts::123456789012:assumed-role/track2-test-role/')"
+    assert score_gcp_condition(cond) == Confidence.HIGH
+    # Still HIGH even with aws_account_id passed -- a role-level pin is
+    # never downgraded by the account-level floor.
+    assert score_gcp_condition(cond, aws_account_id="123456789012") == Confidence.HIGH
+
+
+def test_gcp_account_only_arn_startswith_prefix_is_medium():
+    """A startsWith() prefix that stops at the assumed-role/ boundary
+    with no role name after it only narrows to the account -- same
+    confidence tier as an explicit assertion.account == '...' check, not
+    a role-level pin."""
+    cond = "assertion.arn.startsWith('arn:aws:sts::123456789012:assumed-role/')"
+    assert score_gcp_condition(cond) == Confidence.MEDIUM

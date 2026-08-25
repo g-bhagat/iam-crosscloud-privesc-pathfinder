@@ -223,7 +223,14 @@ def tag_confidence(edges: list[Edge]) -> tuple[list[Edge], list[AdvisoryNote]]:
 def _score_edge(e: Edge) -> Confidence:
     if e.condition and e.condition.strip().startswith("{"):
         return score_aws_condition(e.condition)
-    return score_gcp_condition(e.condition)
+    # aws_account_id: set by gcp_collector.py's AWS-type-provider branch
+    # (see _emit_workload_identity_edge) on the edges it emits -- an
+    # AWS-type WIF provider is always scoped to exactly one AWS account
+    # at the provider level, so score_gcp_condition needs this to
+    # correctly floor an empty/unrecognized condition to MEDIUM instead
+    # of LOW rather than treating it as "no evidence of scoping at all."
+    aws_account_id = e.attributes.get("aws_account_id") if e.attributes else None
+    return score_gcp_condition(e.condition, aws_account_id=aws_account_id)
 
 
 def correlate(nodes: list[Node], edges: list[Edge]) -> tuple[list[Node], list[Edge], list[AdvisoryNote]]:
