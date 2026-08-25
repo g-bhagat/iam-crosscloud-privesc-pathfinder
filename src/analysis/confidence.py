@@ -62,7 +62,21 @@ def score_aws_condition(condition_json: str | None) -> Confidence:
     HIGH:   StringEquals/StringLike on the OIDC `sub` claim naming a
             specific repo AND ref (`repo:org/repo:ref:refs/heads/x`), or
             any condition that otherwise pins a single external ID /
-            role session name.
+            role session name. Also HIGH: a Google OIDC federation
+            condition's `<issuer>:sub` claim (e.g.
+            `accounts.google.com:sub`) pinned to Google's numeric
+            subject ID for one specific principal -- the Track 3
+            (AWS-trusts-GCP) equivalent of a GitHub `sub` pin. Google's
+            subject IDs are long (~21-digit) numeric strings with no
+            further delimited structure, unlike GitHub's `repo:org/...`
+            shape, so there's nothing to pattern-match beyond "long
+            enough to be one, sitting under the right key" -- 15+ digits
+            keeps it clearly distinguishable from a 12-digit AWS account
+            ID (the check right above) and is well under any real
+            Google subject ID's actual length. The `*:sub` key
+            requirement is load-bearing: a long number under some other,
+            unrelated condition key is deliberately NOT treated as a
+            pin on its own.
     MEDIUM: a condition is present but only narrows to a coarser scope
             (e.g. `repo:org/*` with no ref, or an account/org-level
             match without a specific subject).
@@ -79,19 +93,22 @@ def score_aws_condition(condition_json: str | None) -> Confidence:
     except (TypeError, json.JSONDecodeError):
         return Confidence.LOW
 
-    values = _flatten_condition_values(condition)
-    if not values:
+    items = _flatten_condition_items(condition)
+    if not items:
         return Confidence.LOW
 
-    for v in values:
+    for key, v in items:
         # repo:org/repo:ref:refs/heads/branch -- both repo AND ref pinned
         if re.match(r"^repo:[^/]+/[^:]+:ref:refs/", v):
             return Confidence.HIGH
         # a specific role ARN, account ID + fixed external ID, etc.
         if re.match(r"^arn:aws:", v) or re.match(r"^[0-9]{12}$", v):
             return Confidence.HIGH
+        # Google OIDC subject ID pin, e.g. "accounts.google.com:sub": "1122...".
+        if key.endswith(":sub") and re.match(r"^\d{15,}$", v):
+            return Confidence.HIGH
 
-    for v in values:
+    for _key, v in items:
         # repo:org/repo:* (repo pinned, ref wildcarded) or repo:org/*
         # (org pinned only) -- real narrowing, but to a set, not one ID.
         if v.startswith("repo:"):
@@ -137,17 +154,22 @@ def score_gcp_condition(attribute_condition: str | None) -> Confidence:
     return Confidence.LOW
 
 
-def _flatten_condition_values(condition: dict) -> list[str]:
-    """AWS Condition blocks nest as {operator: {key: value_or_list}}."""
-    values: list[str] = []
+def _flatten_condition_items(condition: dict) -> list[tuple[str, str]]:
+    """AWS Condition blocks nest as {operator: {key: value_or_list}}.
+    Keeps each value's condition key too -- needed to recognize a value
+    that's only a HIGH-confidence pin when paired with a specific key
+    shape (a Google OIDC subject ID is "just a long number"; it only
+    means "this condition names one specific identity" when it's under a
+    `*:sub` key, not some unrelated numeric condition)."""
+    items: list[tuple[str, str]] = []
     if not isinstance(condition, dict):
-        return values
+        return items
     for operator_block in condition.values():
         if not isinstance(operator_block, dict):
             continue
-        for v in operator_block.values():
+        for key, v in operator_block.items():
             if isinstance(v, list):
-                values.extend(str(x) for x in v)
+                items.extend((key, str(x)) for x in v)
             else:
-                values.append(str(v))
-    return values
+                items.append((key, str(v)))
+    return items
