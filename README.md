@@ -63,6 +63,16 @@ token, exchanged for real temporary AWS admin credentials.
 ![Scenario3 Graph](images/scenario3.png)
 
 
+## Framework mapping and Mitigation
+
+
+| Scenario | MITRE ATT&CK | NIST SP 800-53 | CIS Controls | Mitigation |
+| :--- | :--- | :---| :--- | :---|
+|CI/CD identity trusted by both clouds | T1550.001, T1199 | AC-3 | 5.4, 6.8 | Check repository + ref, not just repository_owner |
+| GCP trusts an AWS account directly | T1199, T1078.004 | AC-6 | 3.3 | Add a role-scoped attribute_condition, not just the account ID |
+| AWS trusts GCP directly | T1199, T1078.004 | AC-6 | 3.3 | Add accounts.google.com:sub pinned to one GCP service account |
+
+
 ## Repo layout
 
 - `src/` — collectors, correlation engine, escalation rules, pathfinder
