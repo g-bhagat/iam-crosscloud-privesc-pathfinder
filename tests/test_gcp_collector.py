@@ -289,6 +289,32 @@ def test_token_creator_produces_can_impersonate_edge(sa_list):
     )
 
 
+def test_human_user_node_gets_short_name_not_full_email(sa_list):
+    """Readability fix: a NodeType.USER node for a human Google account
+    previously used the FULL EMAIL as its `name` -- inconsistent with
+    every other node type in the graph (short display label, full detail
+    in `attributes`). The email's local part is now the name; the full
+    email moves to attributes["email"]. Node `id` is unchanged (still the
+    full email), so sanitize.py's human-email masking is unaffected --
+    see test_sanitize.py for that half."""
+    iam_client = _build_iam_client(
+        service_accounts=sa_list,
+        sa_policies={
+            OWNER_SA_RESOURCE: {
+                "bindings": [
+                    {"role": "roles/iam.serviceAccountTokenCreator", "members": ["user:gopilalbhagat9@gmail.com"]},
+                ]
+            },
+        },
+    )
+    collector = GCPCollector(asset_client=MagicMock(), iam_client=iam_client, project_id=PROJECT_ID)
+    nodes, _edges = collector.collect()
+
+    user_node = next(n for n in nodes if n.id == "gcp:user:gopilalbhagat9@gmail.com")
+    assert user_node.name == "gopilalbhagat9", "must be the short local-part, not the full email"
+    assert user_node.attributes["email"] == "gopilalbhagat9@gmail.com"
+
+
 def test_service_account_user_produces_can_pass_role_edge(sa_list):
     iam_client = _build_iam_client(
         service_accounts=sa_list,

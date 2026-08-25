@@ -242,3 +242,36 @@ def test_aws_managed_policy_attachment_gets_a_real_node_and_edge(monkeypatch, tm
         html = out_path.read_text()
         assert "managed-only-role" in html
         assert "AdministratorAccess" in html
+
+
+def test_aws_principal_node_gets_short_name_not_full_arn(aws_session, account_id):
+    """Readability fix: a plain AWS principal (not Federated) in a trust
+    policy previously got the FULL ARN as its node `name` -- inconsistent
+    with every other node type in the graph (role name, SA email,
+    username -- short display label, full detail in `attributes`). The
+    resource part of the ARN ("admin") is now the name; the full ARN
+    moves to attributes["arn"]."""
+    trusting_principal_arn = f"arn:aws:iam::{account_id}:user/admin"
+    trust_doc = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"AWS": trusting_principal_arn},
+                "Action": "sts:AssumeRole",
+            }
+        ],
+    }
+    iam = aws_session.client("iam")
+    iam.create_role(RoleName="cross-account-role", AssumeRolePolicyDocument=json.dumps(trust_doc))
+
+    collector = AWSCollector(aws_session, account_id=account_id)
+    nodes, edges = collector.collect()
+
+    principal_id = f"aws:principal:{trusting_principal_arn}"
+    principal_node = next((n for n in nodes if n.id == principal_id), None)
+    assert principal_node is not None
+    assert principal_node.name == "admin", "must be the short resource name, not the full ARN"
+    assert principal_node.attributes["arn"] == trusting_principal_arn
+
+    assert any(e.source == principal_id and e.type == EdgeType.CAN_ASSUME for e in edges)
