@@ -24,6 +24,44 @@ def test_different_real_account_ids_get_different_placeholders():
     assert "123456789012" not in a and "999988887777" not in b
 
 
+def test_aws_external_account_node_id_masked():
+    """GCPCollector's synthetic Track 2 node id -- an AWS account ID
+    appearing outside an ARN entirely, so _AWS_ARN_ACCOUNT_RE alone
+    doesn't cover it."""
+    s = GraphSanitizer()
+    out = s.sanitize_text("aws:external_account:999988887777")
+    assert "999988887777" not in out
+    assert out == "aws:external_account:100000000000"
+
+
+def test_aws_account_id_in_node_name_phrase_masked():
+    s = GraphSanitizer()
+    out = s.sanitize_text("any AWS principal in account 999988887777")
+    assert "999988887777" not in out
+    assert out == "any AWS principal in account 100000000000"
+
+
+def test_aws_account_id_bare_attribute_value_masked():
+    """attributes["aws_account_id"] on GCPCollector's Track 2 node/edge is
+    the account ID with no wrapping text at all -- the narrowest, most
+    false-positive-prone shape, so it's fully anchored (whole-string
+    match only), not a blanket embedded-digits search."""
+    s = GraphSanitizer()
+    out = s.sanitize_text("999988887777")
+    assert out != "999988887777"
+    assert out == "100000000000"
+
+
+def test_aws_external_account_id_consistent_with_arn_elsewhere_in_same_graph():
+    """The same real account referenced both as a synthetic Track 2 node
+    and as a real ARN elsewhere in the graph must map to the SAME
+    placeholder -- proves both shapes share _aws_account_placeholder."""
+    s = GraphSanitizer()
+    from_node_id = s.sanitize_text("aws:external_account:999988887777")
+    from_arn = s.sanitize_text("arn:aws:iam::999988887777:role/some-role")
+    assert from_node_id.split(":")[-1] == from_arn.split(":")[4]
+
+
 def test_gcp_project_id_in_resource_path_masked():
     s = GraphSanitizer()
     out = s.sanitize_text("projects/iam-pathfinder-sandbox/serviceAccounts/track1-owner-sa@x.iam.gserviceaccount.com")
@@ -147,6 +185,30 @@ def test_sanitize_graph_masks_node_attributes():
     new_nodes, _new_edges, _sanitizer = sanitize_graph([node], [])
     assert "123456789012" not in new_nodes[0].attributes["arn"]
     assert new_nodes[0].attributes["created"] == "2026-01-01"  # untouched, not identifying
+
+
+def test_sanitize_graph_masks_gcp_collector_track2_synthetic_node():
+    """End-to-end through sanitize_node/sanitize_graph (not just raw
+    sanitize_text) for the exact node shape GCPCollector's Track 2 fix
+    produces: id, name, AND the bare aws_account_id attribute all embed
+    the real account ID and must all come out masked, consistently."""
+    node = Node(
+        id="aws:external_account:999988887777",
+        type=NodeType.USER,
+        cloud=Cloud.AWS,
+        name="any AWS principal in account 999988887777",
+        external_facing=True,
+        attributes={"aws_account_id": "999988887777"},
+    )
+    new_nodes, _new_edges, _sanitizer = sanitize_graph([node], [])
+    sanitized = new_nodes[0]
+    assert "999988887777" not in sanitized.id
+    assert "999988887777" not in sanitized.name
+    assert "999988887777" not in sanitized.attributes["aws_account_id"]
+    # All three must resolve to the SAME placeholder account.
+    node_id_placeholder = sanitized.id.split(":")[-1]
+    assert node_id_placeholder in sanitized.name
+    assert sanitized.attributes["aws_account_id"] == node_id_placeholder
 
 
 def test_sanitize_graph_masks_list_attributes():

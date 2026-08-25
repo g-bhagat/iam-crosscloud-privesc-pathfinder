@@ -205,6 +205,88 @@ def _cai_owner_grant(project_id: str, owner_email: str):
     )
 
 
+def _real_gcp_collector_output_track2(project_id: str, pool_name: str, aws_account_id: str) -> tuple[list, list]:
+    """Real GCPCollector output for Track 2's actual mechanism: a GCP WIF
+    pool trusting an AWS account directly (no third-party OIDC issuer),
+    account-only scoped (the planted misconfiguration -- real federation,
+    but the trusted principal is "anyone in this AWS account," not one
+    specific role), bound to an is_admin (roles/owner) SA. No AWSCollector
+    involved: Track 2's AWS-side "source" is entirely the synthetic
+    aws:external_account:<id> node GCPCollector itself creates."""
+    owner_email = f"track2-owner-sa@{project_id}.iam.gserviceaccount.com"
+    owner_resource = f"projects/{project_id}/serviceAccounts/{owner_email}"
+
+    aws_provider = {
+        "name": f"{pool_name}/providers/aws-account-only",
+        "attributeCondition": f'assertion.account == "{aws_account_id}"',
+        "attributeMapping": {"google.subject": "assertion.arn"},
+        "aws": {"accountId": aws_account_id},
+    }
+
+    iam_client = MagicMock()
+    projects = iam_client.projects.return_value
+    locations = projects.locations.return_value
+    wip = locations.workloadIdentityPools.return_value
+    wip.list.return_value = _execute({"workloadIdentityPools": [{"name": pool_name}]})
+    providers = wip.providers.return_value
+    providers.list.return_value = _execute({"workloadIdentityPoolProviders": [aws_provider]})
+
+    sa = projects.serviceAccounts.return_value
+    sa.list.return_value = _execute({"accounts": [{"name": owner_resource, "email": owner_email, "uniqueId": "3"}]})
+    sa.list_next.return_value = None
+    sa_policies = {
+        owner_resource: {
+            "bindings": [
+                {
+                    "role": "roles/iam.workloadIdentityUser",
+                    "members": [
+                        f"principal://iam.googleapis.com/{pool_name}/subject/"
+                        f"arn:aws:sts::{aws_account_id}:assumed-role/gha-deployer/GitHubActions"
+                    ],
+                }
+            ]
+        },
+    }
+    sa.getIamPolicy.side_effect = lambda resource: _execute(sa_policies.get(resource, {"bindings": []}))
+    sa.keys.return_value.list.side_effect = lambda name, keyTypes: _execute({"keys": []})
+
+    asset_client = MagicMock()
+    asset_client.search_all_iam_policies.return_value = [_cai_owner_grant(project_id, owner_email)]
+
+    collector = GCPCollector(asset_client=asset_client, iam_client=iam_client, project_id=project_id)
+    return collector.collect()
+
+
+def test_real_gcp_collector_output_produces_track2_true_positive_finding():
+    """Regression test for a real bug: GCPCollector's AWS-type-provider
+    branch (Track 2's actual mechanism) previously emitted nothing at
+    all, so real Track 2 infrastructure -- proven working via a live
+    AWS->GCP token exchange -- produced zero edges, zero findings, zero
+    paths. Runs GCPCollector output alone (no AWSCollector needed) through
+    the full pipeline: collector -> correlation -> escalation rules ->
+    pathfinder."""
+    gcp_project_id = "iam-pathfinder-sandbox"
+    pool_name = "projects/111122223333/locations/global/workloadIdentityPools/aws-trust-pool"
+    aws_account_id = "999988887777"
+
+    gcp_nodes, gcp_edges = _real_gcp_collector_output_track2(gcp_project_id, pool_name, aws_account_id)
+
+    merged_nodes, merged_edges, advisories = correlate(gcp_nodes, gcp_edges)
+    assert not advisories, "account-only scoping is real federation (MEDIUM), not a LOW-confidence guess"
+
+    federates = [e for e in merged_edges if e.type == EdgeType.FEDERATES_WITH]
+    assert len(federates) == 1
+    assert federates[0].attributes["confidence"] == Confidence.MEDIUM.value
+
+    result = run_all(merged_nodes, merged_edges)
+    owner_id = next(n.id for n in merged_nodes if "track2-owner-sa" in n.name)
+    pattern2_targets = {f.target_node for f in result.findings if f.pattern_id == 2}
+    assert owner_id in pattern2_targets
+
+    paths = find_escalation_paths(merged_nodes, merged_edges, external_facing_only=True)
+    assert any(p.target == owner_id for p in paths)
+
+
 def test_real_aws_and_real_gcp_collectors_produce_a_true_positive_finding():
     """Both sides now real collector output -- proves the full pipeline
     (two independent collectors -> correlation -> escalation rules ->

@@ -40,7 +40,15 @@ What it builds:
   actually map the attribute the binding's member string names
   (_collect_sa_iam_bindings + _collect_workload_identity_pools together --
   see _emit_workload_identity_edge). THIS IS THE KEY CROSS-CLOUD EDGE and
-  the exact mechanism Track 1's planted misconfiguration uses.
+  the exact mechanism Track 1's planted misconfiguration uses. When the
+  matched provider trusts an AWS account directly (Track 2's mechanism,
+  no third-party OIDC issuer) rather than a bridged third-party issuer,
+  the edge's source is a synthetic `aws:external_account:<id>` node
+  standing in for "any principal in that AWS account" -- there's no
+  bridge node to originate from, and correlation.py's
+  merge_direct_references() only ever rewrites an edge that already
+  exists, never creates one, so this collector has to emit the edge
+  itself rather than leave it for correlation to conjure up.
 - APP_REGISTRATION/CROSS_CLOUD bridge nodes, one per distinct OIDC issuer
   URI seen across every WIF provider in the project -- regardless of
   whether any SA binding currently references that provider yet, mirroring
@@ -291,10 +299,58 @@ class GCPCollector:
             matched = True
             bridge_id = provider.get("bridge_id")
             if bridge_id is None:
-                # AWS-principal provider -- no bridge node; leave the raw
-                # data for correlation.py's merge_direct_references() to
-                # resolve via the AWS account/role reference, if any, in
-                # attribute_condition. Nothing to emit here.
+                # AWS-principal provider (Track 2's actual mechanism: a GCP
+                # WIF pool trusting an AWS account directly, no third-party
+                # OIDC issuer involved) -- no bridge node, so emit a direct
+                # edge instead, from a synthetic node standing in for "any
+                # principal in this trusted AWS account" straight to the SA
+                # (already precisely known -- this IS the specific SA whose
+                # IAM policy grants the binding). Previously this branch
+                # emitted nothing at all, on the theory that
+                # correlation.py's merge_direct_references() would resolve
+                # it -- but that function only ever REWRITES an edge that
+                # already exists; it never creates one from scratch. With
+                # nothing emitted here, real Track 2 infrastructure (a live,
+                # working AWS->GCP token exchange) produced zero edges,
+                # zero findings, zero paths. attribute_condition (the CEL
+                # scoping condition) travels on the edge unchanged, same as
+                # the bridge-node branch below -- confidence.py's
+                # score_gcp_condition() is what actually distinguishes
+                # Track 2's loosely-scoped (MEDIUM) misconfiguration from a
+                # correctly role-scoped (HIGH) control, off this same
+                # condition string.
+                account_id = provider.get("aws_account_id")
+                source_id = self._aws_external_account_node_id(account_id)
+                self.nodes.setdefault(
+                    source_id,
+                    Node(
+                        id=source_id,
+                        # No specific IAM role/user is named -- mirrors
+                        # _member_to_node's allUsers/allAuthenticatedUsers
+                        # handling on the GCP side: NodeType.USER stands in
+                        # for "an unresolved, broad set of principals",
+                        # not one first-class identity.
+                        type=NodeType.USER,
+                        cloud=Cloud.AWS,
+                        name=f"any AWS principal in account {account_id}",
+                        external_facing=True,
+                        attributes={"aws_account_id": account_id},
+                    ),
+                )
+                self.edges.append(
+                    Edge(
+                        source=source_id,
+                        target=sa_node.id,
+                        type=EdgeType.FEDERATES_WITH,
+                        cloud=Cloud.CROSS_CLOUD,
+                        condition=provider.get("attribute_condition"),
+                        evidence=(
+                            f"Workload Identity Federation binding ({provider['name']}) trusts AWS "
+                            f"account {account_id} directly -- no third-party OIDC issuer involved"
+                        ),
+                        attributes={"aws_account_id": account_id},
+                    )
+                )
                 continue
             self.edges.append(
                 Edge(
@@ -387,6 +443,9 @@ class GCPCollector:
 
     def _sa_node_id(self, email: str) -> str:
         return f"gcp:service_account:{email}"
+
+    def _aws_external_account_node_id(self, account_id: str) -> str:
+        return f"aws:external_account:{account_id}"
 
     def _member_to_node(self, member: str) -> Node | None:
         """

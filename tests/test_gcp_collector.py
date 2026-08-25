@@ -415,3 +415,72 @@ def test_aws_type_provider_registers_no_bridge_node(pools):
     nodes, _edges = collector.collect()
 
     assert not any(n.cloud == Cloud.CROSS_CLOUD and n.id.startswith("gcp:wif_bridge:") for n in nodes)
+
+
+AWS_ACCOUNT_ID = "999988887777"
+AWS_ACCOUNT_PROVIDER = {
+    "name": f"{POOL_NAME}/providers/aws-account-only",
+    # Account-only scoping -- Track 2's actual planted misconfiguration:
+    # real federation, but the trusted principal is "anyone in this AWS
+    # account," not one specific role.
+    "attributeCondition": f'assertion.account == "{AWS_ACCOUNT_ID}"',
+    "attributeMapping": {"google.subject": "assertion.arn"},
+    "aws": {"accountId": AWS_ACCOUNT_ID},
+}
+
+
+def test_aws_type_provider_produces_federates_with_edge_from_synthetic_account_node(sa_list, pools):
+    """Regression test for a real bug: an AWS-type provider (Track 2's
+    actual mechanism -- a GCP WIF pool trusting an AWS account directly,
+    no third-party OIDC issuer involved) previously made
+    _emit_workload_identity_edge emit NOTHING at all, on the theory that
+    correlation.py's merge_direct_references() would resolve it later --
+    but that function only ever rewrites an edge that already exists, it
+    never creates one from scratch. Confirmed against real Track 2
+    infrastructure (proven working via a live AWS->GCP token exchange):
+    zero edges, zero findings, zero paths.
+
+    Must now produce a real FEDERATES_WITH edge from a synthetic "any AWS
+    principal in this account" node to the target SA, carrying the raw
+    account-only attribute_condition unchanged.
+    """
+    iam_client = _build_iam_client(
+        pools=pools,
+        providers_by_pool={POOL_NAME: [AWS_ACCOUNT_PROVIDER]},
+        service_accounts=sa_list,
+        sa_policies={
+            OWNER_SA_RESOURCE: {
+                "bindings": [
+                    {
+                        "role": "roles/iam.workloadIdentityUser",
+                        "members": [
+                            f"principal://iam.googleapis.com/{POOL_NAME}/subject/"
+                            f"arn:aws:sts::{AWS_ACCOUNT_ID}:assumed-role/gha-deployer/GitHubActions"
+                        ],
+                    }
+                ]
+            },
+        },
+    )
+    collector = GCPCollector(asset_client=MagicMock(), iam_client=iam_client, project_id=PROJECT_ID)
+    nodes, edges = collector.collect()
+
+    source_id = f"aws:external_account:{AWS_ACCOUNT_ID}"
+    owner_sa_id = next(n.id for n in nodes if n.name == OWNER_SA_EMAIL)
+
+    # The synthetic source node must actually exist as a real node -- an
+    # edge pointing at a node that was never created is exactly the
+    # AWS-managed-policy bug this codebase already fixed once
+    # (aws_collector.py's _collect_identity_policies); don't repeat it.
+    source_node = next((n for n in nodes if n.id == source_id), None)
+    assert source_node is not None, "synthetic AWS account node must be a real node, not just an edge endpoint"
+    assert source_node.cloud == Cloud.AWS
+    assert source_node.external_facing is True
+    assert source_node.attributes["aws_account_id"] == AWS_ACCOUNT_ID
+
+    federates = [e for e in edges if e.type == EdgeType.FEDERATES_WITH and e.target == owner_sa_id]
+    assert len(federates) == 1
+    edge = federates[0]
+    assert edge.source == source_id
+    assert edge.condition == AWS_ACCOUNT_PROVIDER["attributeCondition"]
+    assert edge.attributes["aws_account_id"] == AWS_ACCOUNT_ID
