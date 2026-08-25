@@ -22,7 +22,7 @@ until each prior use case works end to end against real sandbox data.
 - [x] 2. Write the threat model doc (trust boundaries, 5 escalation paths, correlation confidence tiers) — done (`docs/THREAT_MODEL.md`)
 - [ ] 3. Create a dedicated AWS free-tier sandbox account
 - [ ] 4. Create a dedicated GCP free-tier project
-- [ ] 5. Create a least-privilege, read-only scanning credential in each cloud — AWS policy written (`terraform/scanner/aws.tf`), not applied; GCP side not started
+- [ ] 5. Create a least-privilege, read-only scanning credential in each cloud — both sides now written in Terraform (`terraform/scanner/aws.tf`, `terraform/scanner/gcp.tf`), verified against real, already-validated identities; neither yet `terraform apply`'d against the real sandbox (manual apply/destroy is intentionally kept off Claude Code — see task notes)
 - [x] 6. `graph_schema.py` — done
 - [ ] 7. Get `AWSCollector` running against the real sandbox account, debug against live API responses — validated against a moto-mocked AWS account (`tests/test_aws_collector.py`, `tests/test_collector_correlation_integration.py`); real sandbox validation still pending task 3
 - [x] 8. Implement `GCPCollector` for real — done (`src/collectors/gcp_collector.py`); validated against real API response shapes via mocked unit tests (`tests/test_gcp_collector.py`, 15 cases: service accounts, user-managed keys, WIF pool/provider bridging, the loose/scoped Track 1 bindings, CAI-based is_admin flagging) since no moto-equivalent exists for GCP; `scripts/run_gcp_collector.py` written for live validation against the real sandbox project, to be run locally where ADC is already set up — not yet run against the real project from this session
