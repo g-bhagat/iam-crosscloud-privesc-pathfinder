@@ -1,17 +1,18 @@
 # Task list — Multi-Cloud IAM Privilege Escalation Path Analyzer (AWS + GCP)
 
-Scope: AWS + GCP only, two fully-built use cases. Azure is documented as
+Scope: AWS + GCP only, three fully-built use cases. Azure is documented as
 in-scope for the methodology but deliberately deferred for implementation
-(no current validated Azure test environment). A third use case (mirror-
-direction AWS-trusts-GCP) and static credential leakage were considered
-and deliberately deferred — see "Deferred (documented, not built)" below —
-in favor of going deep on two structurally distinct mechanisms rather than
-shallow on three. See docs/THREAT_MODEL.md (once written) for the full
-rationale and the escalation-pattern catalog these tasks implement.
+(no current validated Azure test environment). Static credential leakage,
+DR/failover, and cross-cloud SSO deprovisioning were considered and
+deliberately deferred — see "Deferred (documented, not built)" below.
+Mirror-direction AWS-trusts-GCP was originally deferred too, then
+un-deferred as Track 3 — see SCOPE.md "Reversed decisions" for why.
+See docs/THREAT_MODEL.md for the full rationale and the escalation-pattern
+catalog these tasks implement.
 
 Sequencing rule: build Phase 0 + Track 1 as one complete vertical slice
-before starting Track 2. Don't parallelize until one use case works end
-to end against real sandbox data.
+before starting Track 2, and Track 2 before Track 3. Don't parallelize
+until each prior use case works end to end against real sandbox data.
 
 ---
 
@@ -60,18 +61,34 @@ to end against real sandbox data.
 
 ---
 
+## Track 3 — Mirror-direction AWS-trusts-GCP (the structurally airtight case)
+
+An AWS role's trust policy accepts `AssumeRoleWithWebIdentity` calls
+validated against Google's OIDC issuer (`accounts.google.com`) — AWS's
+outbound identity federation, the reverse of Track 2's mechanism. This
+is the pattern where the target's privilege (`is_admin` on the AWS
+role) is only computable from AWS's own data — a GCP-only tool cannot
+determine it, regardless of how well it reads its own WIF/IAM data.
+See SCOPE.md "Reversed decisions" for the full reasoning.
+
+- [ ] 35. Register an AWS IAM OIDC identity provider trusting `https://accounts.google.com`
+- [ ] 36. Create an AWS role with a trust policy scoped only to the issuer + audience, missing a `sub` (subject) condition for a specific GCP service account — planted misconfiguration; grant it an admin-equivalent AWS policy so `is_admin=True`
+- [ ] 37. Create a second AWS role with a correctly scoped trust condition (matches one specific GCP service account email in `sub`) — negative control
+- [ ] 38. On the GCP side: an ordinary-looking service account with no notable GCP permissions of its own (the point being it looks unremarkable from GCP's perspective) that can generate identity tokens
+- [ ] 39. From GCP, call `AssumeRoleWithWebIdentity` using that SA's identity token to confirm the path is real, not just a theoretical config
+- [ ] 40. Fix `check_pattern2`'s hardcoded `pattern_name`/`pattern_id` — verified empirically that its matching logic is already direction-agnostic (fires correctly for a synthetic GCP→AWS edge with zero changes), but the pattern name/ID are hardcoded to describe only the GCP-target direction. Make both direction-aware (e.g. branch on `target.cloud` to pick "Overly-broad GCP WIF trust of an AWS principal" / pattern_id 2 vs "Overly-broad AWS trust of a GCP principal" / pattern_id 3) so Track 3 gets its own correctly-labeled MITRE/NIST mapping in reporting, without duplicating the underlying match logic
+- [ ] 41. Validate true positive (misconfigured role) + true negative (scoped control)
+- [ ] 42. Write remediation before/after (trust policy `sub` condition diff)
+- [ ] 43. Write up case study — explicitly framed around why this is the structurally necessary case, not just another example
+
+---
+
 ## Deferred (documented, not built)
 
 These are real, catalogued escalation patterns — written up in the threat
 model with mechanism, precondition, and blast radius — but deliberately
-not implemented in the reference build, to keep scope tight around two
-fully-validated use cases rather than three partially-validated ones.
+not implemented in the reference build.
 
-- **Mirror-direction AWS-trusts-GCP** (AWS outbound identity federation via
-  `AssumeRoleWithWebIdentity` against Google's OIDC): same underlying
-  detection logic as Track 2 (missing subject-level scoping), just checked
-  on the other side of the trust relationship — low incremental value as
-  a third case.
 - **Static credential leakage across the cloud boundary** (a GCP key
   stored as a static AWS secret, or vice versa): a genuinely different
   capability (content/secrets scanning, not policy-graph traversal) —
@@ -79,12 +96,17 @@ fully-validated use cases rather than three partially-validated ones.
 - **DR/failover identity** and **cross-cloud SSO deprovisioning gap**:
   deferred earlier for sandbox-complexity reasons (multi-region setup /
   requires a real IdP tenant wired to both clouds).
+- **Compound/chained scenarios** (both clouds independently misconfigured
+  from the same originating identity — does the pathfinder find one
+  chained path, or two independent findings?): worth testing via
+  `scripts/explore_scenarios.py` before deciding whether it needs new
+  sandbox infrastructure or a pathfinder code change. Not yet a track.
 
 ---
 
 ## Wrap-up
 
-- [ ] 31. Full validation pass across both tracks together — confirm no cross-contamination between detectors
-- [ ] 32. Write consolidated remediation report / executive summary
-- [ ] 33. Write operationalization section (how this runs on a schedule in a real org)
-- [ ] 34. Assemble portfolio website content from the case studies (hero visual, problem statement, architecture diagram, one worked example, remediation before/after, framework mapping, deferred-scope note, repo link)
+- [ ] 44. Full validation pass across all three tracks together — confirm no cross-contamination between detectors
+- [ ] 45. Write consolidated remediation report / executive summary
+- [ ] 46. Write operationalization section (how this runs on a schedule in a real org)
+- [ ] 47. Assemble portfolio website content from the case studies (hero visual, problem statement, architecture diagram, one worked example per track, remediation before/after, framework mapping, deferred-scope note, repo link)
