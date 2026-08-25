@@ -128,6 +128,65 @@ def test_collect_handles_zero_oidc_providers(aws_session, account_id):
     assert not any(n.id.startswith("federated:") for n in nodes)
 
 
+def test_google_builtin_federated_principal_classified_as_gcp_cloud(aws_session, account_id):
+    """Regression test for a real bug: _parse_trust_policy classified
+    EVERY Federated principal's bridge node as cloud=Cloud.CROSS_CLOUD,
+    with no distinction between a genuine third party (GitHub -- unrelated
+    to both clouds) and AWS's built-in bare-string shorthand for a
+    provider that IS one of the two clouds' own identity systems
+    (accounts.google.com IS GCP's identity system). check_pattern2/3
+    requires source.cloud in (Cloud.AWS, Cloud.GCP) to recognize a direct
+    cross-cloud trust -- a CROSS_CLOUD source can never satisfy that, so
+    Track 3 could only ever surface as a bare pathfinder path, never a
+    named Finding with severity/MITRE mapping. Confirmed against real
+    Track 3 infrastructure, where AWS's legacy web-identity-federation
+    shorthand ("Federated": "accounts.google.com", no ARN at all -- not
+    an iam:ListOpenIDConnectProviders resource, since no OIDC provider
+    was ever manually registered) is exactly what's deployed."""
+    trust_doc = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Federated": "accounts.google.com"},
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {"StringEquals": {"accounts.google.com:oaud": "https://sts.amazonaws.com/track3-role"}},
+            }
+        ],
+    }
+    iam = aws_session.client("iam")
+    iam.create_role(RoleName="track3-admin-role", AssumeRolePolicyDocument=json.dumps(trust_doc))
+
+    collector = AWSCollector(aws_session, account_id=account_id)
+    nodes, edges = collector.collect()
+
+    bridge_id = "federated:accounts.google.com"
+    bridge = next((n for n in nodes if n.id == bridge_id), None)
+    assert bridge is not None
+    assert bridge.cloud == Cloud.GCP, "accounts.google.com IS GCP's identity system, not a third party"
+
+    federates = [e for e in edges if e.source == bridge_id and e.type == EdgeType.FEDERATES_WITH]
+    assert len(federates) == 1
+    assert federates[0].target.endswith("track3-admin-role")
+
+
+def test_third_party_oidc_provider_still_classified_cross_cloud(aws_session, account_id):
+    """Regression guard against over-broad reclassification: a genuine
+    third-party OIDC provider (GitHub Actions, referenced by ARN --
+    Track 1's actual mechanism) must stay CROSS_CLOUD, not get swept
+    into the new GCP-specific carve-out."""
+    provider_arn = _create_oidc_provider(aws_session)
+    trust_doc = json.loads(json.dumps(ROLE_TRUST_POLICY).replace("{account}", account_id))
+    iam = aws_session.client("iam")
+    iam.create_role(RoleName="cicd-deploy-role", AssumeRolePolicyDocument=json.dumps(trust_doc))
+
+    collector = AWSCollector(aws_session, account_id=account_id)
+    nodes, _edges = collector.collect()
+
+    bridge = next(n for n in nodes if n.id == f"federated:{provider_arn}")
+    assert bridge.cloud == Cloud.CROSS_CLOUD
+
+
 def test_aws_managed_policy_attachment_gets_a_real_node_and_edge(monkeypatch, tmp_path):
     """Regression test for a real bug: _collect_identity_policies() created
     a HAS_POLICY edge for every attached policy, but only
