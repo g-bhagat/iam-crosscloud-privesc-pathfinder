@@ -3,40 +3,81 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Project — placeholder</title>
+<title>Architecture — iam-crosscloud-privesc-pathfinder</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <strong>your name</strong>
+  <strong>GB</strong>
   <nav>
     <a href="index.html">Home</a>
-    <a href="project.html" aria-current="page">Project</a>
+    <a href="project.html" aria-current="page">Architecture</a>
   </nav>
 </header>
 
 <main>
-  <span class="status">second page test</span>
-  <h1>Multi-cloud IAM privilege escalation path analyzer</h1>
+  <h1>Architecture</h1>
   <p class="lede">
-    This page confirms multi-page navigation works on GitHub Pages —
-    a plain link to another .html file in the same repo, no routing
-    config needed. Case study content goes here later.
+    AWS and GCP sandbox APIs feed two independent collectors into a
+    unified identity graph, which flows through a correlation engine,
+    escalation rule engine, and pathfinder, producing a remediation
+    report and an interactive visualization.
   </p>
 
   <div class="card">
     <img src="architecture-diagram.svg" alt="System architecture: AWS and GCP sandbox APIs feed dedicated collectors into a unified identity graph, which flows through a correlation engine, escalation rule engine, and pathfinder, producing a remediation report and an interactive visualization." style="width:100%;height:auto;">
   </div>
 
+  <h2>Why two collectors, not one</h2>
+  <p>
+    <code>AWSCollector</code> and <code>GCPCollector</code> each read
+    only their own cloud's API and know nothing about the other.
+    Neither one can, on its own, tell you when an identity it's
+    looking at also has a foothold somewhere else. That correlation
+    only happens once both graphs exist and get merged — which is
+    also why the merge step, not either collector individually, is
+    where the actual finding gets produced.
+  </p>
+
+  <h2>Confidence, not just presence</h2>
+  <p>
+    Every cross-cloud edge is scored HIGH, MEDIUM, or LOW based on how
+    tightly its trust condition is actually scoped — not just whether
+    a trust relationship exists at all. LOW-confidence edges are
+    excluded from traversal entirely, so a name coincidence or a weak
+    correlation can't manufacture a finding that isn't real.
+  </p>
+
+  <h2>Detection has two layers</h2>
+  <p>
+    A rule engine checks the merged graph for the three specific
+    patterns shown on the home page — a federated identity landing
+    directly on a privileged target without enough scoping. A
+    separate, more general pathfinder can also trace multi-hop paths
+    to a privileged node, though those don't carry the same severity
+    or MITRE mapping the three named patterns do.
+  </p>
+
   <div class="card">
-    Coming: hero attack-path diagram, the CI/CD OIDC mismatch case study,
-    the GCP WIF trust case study, remediation before/after, and framework
-    mapping.
+    Full technical rationale, STRIDE analysis, and the escalation
+    pattern catalog are in the repo —
+    <a href="https://github.com/g-bhagat/iam-crosscloud-privesc-pathfinder">github.com/g-bhagat/iam-crosscloud-privesc-pathfinder</a>.
   </div>
 </main>
 
 <footer>
-  Placeholder site · replace before sharing publicly
+  <div class="footer-name">Gopilal Bhagat</div>
+  <div class="footer-icons">
+    <a href="https://github.com/g-bhagat?tab=repositories" aria-label="GitHub" title="GitHub">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.78-.25.78-.55 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.34-1.28-1.69-1.28-1.69-1.04-.72.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.64 1.59.24 2.76.12 3.05.74.8 1.18 1.83 1.18 3.09 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .3.2.66.79.55A10.52 10.52 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+    </a>
+    <a href="https://www.linkedin.com/in/gopilal-bhagat/" aria-label="LinkedIn" title="LinkedIn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20.45 20.45h-3.55v-5.57c0-1.33-.02-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.38-1.85 3.61 0 4.28 2.38 4.28 5.47v6.27ZM5.34 7.43a2.06 2.06 0 1 1 0-4.12 2.06 2.06 0 0 1 0 4.12ZM7.12 20.45H3.56V9h3.56v11.45ZM22.22 0H1.77C.8 0 0 .78 0 1.75v20.5C0 23.22.8 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.75V1.75C24 .78 23.2 0 22.22 0Z"/></svg>
+    </a>
+    <a href="mailto:gopilalnb@gmail.com" aria-label="Email" title="Email">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18v14H3V5Z"/><path d="m3 6 9 7 9-7"/></svg>
+    </a>
+  </div>
 </footer>
 </body>
 </html>
