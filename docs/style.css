@@ -1,21 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
 :root {
-  --bg: #0f1115;
-  --surface: #161920;
-  --border: #262b35;
-  --text: #e8e9ec;
-  --text-muted: #9a9fab;
-  --accent: #4f8cff;
+  --bg: #0b0e14;
+  --surface: #131722;
+  --surface-hover: #171c29;
+  --border: #232838;
+  --border-hover: #2f3650;
+  --text: #e8eaf0;
+  --text-muted: #8b93a7;
+  --teal: #2dd4bf;
+  --coral: #f0625a;
+  --amber: #f5b942;
+  --accent: var(--teal);
 }
 
 * { box-sizing: border-box; }
 
+html { scroll-behavior: smooth; }
+
 body {
   margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
+  background-image:
+    radial-gradient(circle at 15% 8%, rgba(45, 212, 191, 0.06), transparent 40%),
+    radial-gradient(circle at 85% 0%, rgba(240, 98, 90, 0.05), transparent 35%);
   color: var(--text);
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-  line-height: 1.6;
+  font-family: 'IBM Plex Sans', -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.65;
 }
+
+a { color: var(--teal); }
 
 header {
   border-bottom: 1px solid var(--border);
@@ -25,6 +42,13 @@ header {
   align-items: center;
   max-width: 900px;
   margin: 0 auto;
+  width: 100%;
+}
+
+header strong {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 header nav a {
@@ -32,52 +56,129 @@ header nav a {
   text-decoration: none;
   margin-left: 24px;
   font-size: 14px;
+  transition: color 0.15s ease;
 }
 
 header nav a:hover, header nav a[aria-current="page"] {
-  color: var(--text);
+  color: var(--teal);
 }
 
 main {
   max-width: 900px;
   margin: 0 auto;
   padding: 64px 24px;
+  width: 100%;
+  flex: 1;
 }
 
 h1 {
-  font-size: 32px;
-  margin: 0 0 12px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  font-size: 36px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0 0 18px;
+}
+
+h2 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  margin-top: 56px;
+  margin-bottom: 20px;
 }
 
 p.lede {
   color: var(--text-muted);
   font-size: 18px;
-  max-width: 60ch;
+  max-width: 65ch;
+  line-height: 1.7;
 }
 
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 20px;
   margin-top: 32px;
 }
 
-.status {
-  display: inline-block;
-  font-size: 13px;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  padding: 2px 10px;
-  margin-bottom: 16px;
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 24px;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.9em;
+  color: var(--teal);
+}
+
+.scenario h3 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.scenario img {
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin: 16px 0;
 }
 
 footer {
   max-width: 900px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 32px 24px;
   color: var(--text-muted);
   font-size: 13px;
   border-top: 1px solid var(--border);
+  width: 100%;
+  text-align: center;
+}
+
+.footer-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+
+.footer-icons {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.footer-icons a {
+  color: var(--text-muted);
+  display: inline-flex;
+  transition: color 0.15s ease;
+}
+
+.footer-icons a:hover {
+  color: var(--teal);
 }
