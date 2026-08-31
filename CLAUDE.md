@@ -10,9 +10,10 @@ they are the source of truth for scope and sequencing, not this file.
 
 - AWS + GCP only. Azure is documented, not implemented (no validated
   Azure test env available).
-- Two fully-built use cases only (see TASKS.md "Track 1" / "Track 2").
-  A third use case and static credential leakage were deliberately
-  deferred — do not add them without discussing scope first.
+- Three fully-built use cases (see TASKS.md "Track 1" / "Track 2" /
+  "Track 3"). Static credential leakage, DR/failover, and cross-cloud
+  SSO deprovisioning remain deliberately deferred — do not add them
+  without discussing scope first.
 - Read-only credentials only, against two dedicated sandbox accounts.
   Never touch a production, personal, or employer-owned account.
 - No destructive actions anywhere in this project, ever.
@@ -38,7 +39,7 @@ they are the source of truth for scope and sequencing, not this file.
 - `src/collectors/` — AWS (real), GCP (real), Azure (stub, deferred)
 - `src/analysis/` — correlation engine, confidence scoring, escalation rule engine, pathfinder (tasks 9-11)
 - `src/visualization/` — pyvis graph export (task 12)
-- `src/sanitize.py` — masks real account IDs/ARNs/project IDs before anything reaches a published export; `pyvis_export.export_graph(..., sanitize=True)` opts in
+- `src/sanitize.py` — masks real account IDs/ARNs/project IDs and human user email addresses before anything reaches a published export; `pyvis_export.export_graph(..., sanitize=True)` opts in
 - `sample_data/`, `scripts/generate_sample_graph.py`, `scripts/run_pipeline_demo.py` — synthetic Track 1-shaped fixture + end-to-end demo, used to validate tasks 9-12 without live sandbox credentials
 - `scripts/run_aws_collector.py`, `scripts/run_gcp_collector.py` — run each real collector against its real sandbox; meant to be run locally where real credentials/ADC are already set up, not from this sandboxed session
 - `scripts/run_detector.py` — task 19's real-data pipeline (both collectors' JSON dumps → correlation → escalation rules → pathfinder → pyvis export); auto-sanitizes whenever `--output` resolves under `docs/`
@@ -46,96 +47,41 @@ they are the source of truth for scope and sequencing, not this file.
 - `terraform/track1/` — AWS + GCP sandbox infra for Track 1 (tasks 13-18); written, not yet applied/validated against live accounts
 - `terraform/track2/` — GCP-trusts-AWS-directly sandbox infra for Track 2 (tasks 24-30); formalizes infra already manually built and live-validated (real token exchange, real Finding fired) — written, not yet applied from this repo's Terraform
 - `terraform/track3/` — AWS-trusts-GCP-directly sandbox infra for Track 3 (tasks 35-39); same status as track2 — formalizes already-validated manual infra, not yet applied from this repo's Terraform
-- `terraform/scanner/` — the tool's own least-privilege read-only scanner policy (task 5, AWS half); written, not yet applied
+- `terraform/scanner/` — the tool's own least-privilege read-only scanner credential, both AWS and GCP halves (task 5); written, not yet applied
 - `docs/` — the public portfolio site (GitHub Pages, served from here)
 - `SCOPE.md`, `TASKS.md` — read these first, always
 
 ## Current status
 
-Check TASKS.md checkboxes for the authoritative current state. As of
-last handoff: Phase 0 is code-complete except for the live-credential
-tasks. Done: scope + threat model docs (`SCOPE.md`, `docs/THREAT_MODEL.md`),
-`graph_schema.py`, and the full analysis layer (`src/analysis/`,
-`src/visualization/pyvis_export.py`, tasks 9-12) — validated end to end
-against a synthetic Track 1-shaped graph (`sample_data/sample_graph.json`,
-`scripts/run_pipeline_demo.py`), confirming both the true positive (loose
-GCP WIF provider → `roles/owner` SA) and the true negative (correctly
-scoped control) at the correlation + rule-engine + pathfinder level.
-Track 1 Terraform (`terraform/track1/`) is also written but not yet
-applied. `AWSCollector` now also collects OIDC provider resources
-directly (`iam:ListOpenIDConnectProviders`/`iam:GetOpenIDConnectProvider`,
-added to `terraform/scanner/aws.tf`'s least-privilege policy) rather than
-only inferring them from role trust policies, and a moto-mocked test
-suite (`tests/test_aws_collector.py`,
-`tests/test_collector_correlation_integration.py`) validates it — and
-the correlation/rule-engine layer against its real (not hand-crafted)
-output — without needing a live account. That work caught and fixed a
-real pre-existing bug: `_parse_trust_policy`'s federated-principal loop
-never captured the trust policy's `Condition` block, so every AWS-side
-`FEDERATES_WITH` edge would have scored LOW confidence and been silently
-dropped.
+Check TASKS.md checkboxes for the authoritative current state — this
+section is a snapshot, not a running log. For the history of what got
+fixed and why, use `git log`, not this file.
 
-`GCPCollector` (task 8) is now also implemented for real — service
-accounts (+ user-managed-key detection), per-SA IAM bindings
-(`roles/iam.workloadIdentityUser` → `FEDERATES_WITH` with the literal
-`attributeCondition` CEL string passed through untouched;
-`serviceAccountTokenCreator`/`serviceAccountUser` → `CAN_IMPERSONATE`/
-`CAN_PASS_ROLE`), Workload Identity Pool/provider bridging (one bridge
-node per distinct OIDC issuer, mirroring the AWS-side OIDC-provider fix),
-and Cloud Asset Inventory-based `is_admin` flagging. No moto-equivalent
-exists for GCP, so it's validated via `tests/test_gcp_collector.py`
-(mocks built against the real `google-cloud-asset`/
-`google-api-python-client` response shapes, introspected from the
-installed libraries rather than assumed) plus an extended
-`tests/test_collector_correlation_integration.py` case that runs *both*
-real collectors' output through the full correlation → escalation-rules
-→ pathfinder pipeline. This session has no real GCP credentials either
-(confirmed the same way as AWS: `CLOUDSDK_AUTH_ACCESS_TOKEN` is another
-agent-proxy placeholder), and `gcloud`/its download hosts are blocked by
-this session's egress policy, so live validation against the actual
-sandbox project — `scripts/run_gcp_collector.py` — hasn't happened from
-here; that's meant to be run locally where ADC/impersonation already
-works.
+**Code-complete and tested** (synthetic data, and real-shaped output
+from both collectors — see `tests/`): `graph_schema.py`, `AWSCollector`,
+`GCPCollector`, the correlation engine + 3-tier confidence scoring, the
+escalation rule engine (all three patterns), the pathfinder, the pyvis
+export, and `src/sanitize.py`. None of this has been validated against
+a live sandbox account yet — no moto-equivalent exists for GCP, so
+`GCPCollector` is validated via mocks built against the real
+`google-cloud-asset`/`google-api-python-client` response shapes rather
+than a full-service fake.
 
-The sanitization gap `pyvis_export.py`'s docstring used to just flag as
-"callers' responsibility" is now closed: `src/sanitize.py` masks real
-AWS account IDs/ARNs and GCP project IDs/numbers (deterministic,
-run-local pseudonymization — the same real value maps to the same
-placeholder everywhere in one call, so a sanitized graph stays
-internally consistent and edges still resolve to the right nodes).
-`export_graph(..., sanitize=True)` opts in; `scripts/run_detector.py`
-forces it on automatically whenever `--output` resolves under `docs/`,
-rather than relying on remembering a flag, with `--no-sanitize` as a
-deliberate override. Scope is narrow on purpose — only the three
-identifier classes SCOPE.md rule 5 names, not resource/role/SA names or
-GitHub org/repo, which are meant to stay visible in the case study.
+**Blocked on external setup, not code**: the dedicated AWS sandbox
+account and GCP sandbox project (tasks 3–4) don't exist yet. Everything
+downstream of that — applying any Terraform, running the collectors
+against a real account, live true-positive/true-negative validation for
+any track — is written and ready but un-run from this repo. Manual
+`terraform apply`/`destroy` against real cloud accounts is intentionally
+kept off this agent; a human runs that step.
 
-Still blocked on external setup, not code: create the dedicated AWS +
-GCP sandbox accounts (tasks 3–4) and apply the scanner credential
-Terraform against them (task 5) — full live-account validation of tasks
-7-8 and the analysis layer still depends on that.
-
-Track 2 (`terraform/track2/`) and Track 3 (`terraform/track3/`)
-Terraform now exist too — both formalize sandbox infrastructure that was
-already manually built, debugged, and validated live outside this repo
-(real AWS↔GCP token exchanges succeeded, real Findings fired through the
-actual detection pipeline) into the same file structure as
-`terraform/track1/`. Not yet applied from this Terraform specifically
-(same caveat as track1). A number of real bugs surfaced during that live
-validation and are already fixed in `src/` with regression tests: the
-AWS-type-provider branch of `GCPCollector._emit_workload_identity_edge`
-emitting nothing at all; `AWSCollector`'s Federated-principal bridge
-nodes all being classified `CROSS_CLOUD` even for `accounts.google.com`
-(GCP's own identity system, not a third party); `confidence.py`'s
-`score_gcp_condition()` having no pattern for AWS ARNs/accounts at all;
-and a couple of node-label/sanitization follow-ups. `TASKS.md`'s
-checkboxes for tasks 24-30/35-39 stay unchecked until this Terraform is
-actually applied and re-validated from here, per the same convention
-`terraform/track1/` already established.
-
-**Note for whoever picks this up next**: this "Current status" section
-is accurate as a running log but has grown long and increasingly
-incomplete relative to the full session-by-session history — treat
-`TASKS.md` checkboxes as the authoritative source of truth on what's
-actually done, and git log / this file's own accumulated paragraphs as
-the "why," not the other way around.
+**Terraform**: written for the scanner credential and all three tracks
+(`terraform/scanner/`, `terraform/track1/`, `terraform/track2/`,
+`terraform/track3/`) — formatted (`terraform fmt`) and manually
+cross-checked (variable coverage, no dangling references) since
+`terraform init`/`validate` can't reach the provider registry from this
+session. Track 2 and Track 3's underlying misconfigurations were
+separately built and live-validated by hand outside this repo before
+being formalized here (real AWS↔GCP token exchanges succeeded, real
+Findings fired through the actual detection pipeline); Track 1 has not
+yet been validated live at all, by hand or otherwise.

@@ -7,8 +7,9 @@ DR/failover, and cross-cloud SSO deprovisioning were considered and
 deliberately deferred — see "Deferred (documented, not built)" below.
 Mirror-direction AWS-trusts-GCP was originally deferred too, then
 un-deferred as Track 3 — see SCOPE.md "Reversed decisions" for why.
-See docs/THREAT_MODEL.md for the full rationale and the escalation-pattern
-catalog these tasks implement.
+See docs/THREAT_MODEL.md for the STRIDE trust-boundary analysis; each
+track's own mechanism/precondition/blast-radius is described inline
+below and in its case study (task 23/30/43).
 
 Sequencing rule: build Phase 0 + Track 1 as one complete vertical slice
 before starting Track 2, and Track 2 before Track 3. Don't parallelize
@@ -19,7 +20,7 @@ until each prior use case works end to end against real sandbox data.
 ## Phase 0 — Shared foundation
 
 - [x] 1. Write the scope / rules-of-engagement doc — done (`SCOPE.md`)
-- [x] 2. Write the threat model doc (trust boundaries, 3 escalation paths, correlation confidence tiers) — done (`docs/THREAT_MODEL.md`); covers only the three built patterns (Tracks 1-3) — static credential leakage and DR/failover/deprovisioning are tracked as deferred scope below, not modeled in the threat model doc itself
+- [x] 2. Write the threat model doc (STRIDE analysis across the tool's three trust boundaries) — done (`docs/THREAT_MODEL.md`)
 - [ ] 3. Create a dedicated AWS free-tier sandbox account
 - [ ] 4. Create a dedicated GCP free-tier project
 - [ ] 5. Create a least-privilege, read-only scanning credential in each cloud — both sides now written in Terraform (`terraform/scanner/aws.tf`, `terraform/scanner/gcp.tf`), verified against real, already-validated identities; neither yet `terraform apply`'d against the real sandbox (manual apply/destroy is intentionally kept off Claude Code — see task notes)
@@ -86,9 +87,8 @@ See SCOPE.md "Reversed decisions" for the full reasoning.
 ## Deferred (documented, not built)
 
 These are real escalation patterns, considered and deliberately not
-implemented in the reference build. `docs/THREAT_MODEL.md` covers only
-the three built patterns (Tracks 1-3); these are tracked here only, not
-given a full mechanism/precondition/blast-radius write-up anywhere.
+implemented in the reference build — tracked here only, not given a
+full mechanism/precondition/blast-radius write-up anywhere in this repo.
 
 - **Static credential leakage across the cloud boundary** (a GCP key
   stored as a static AWS secret, or vice versa): a genuinely different

@@ -54,7 +54,7 @@ is in scope. Azure is explicitly out of scope for implementation (see
   Identity Federation pools/providers) — `GCPCollector`
 - Cross-cloud correlation logic (the `FEDERATES_WITH` edge + 3-tier
   confidence model)
-- Two fully validated use cases (see TASKS.md):
+- Three fully validated use cases (see TASKS.md):
   - **Track 1**: CI/CD OIDC trust mismatch between AWS and GCP
   - **Track 2**: overly-broad GCP Workload Identity Federation trust of
     an AWS principal
@@ -74,8 +74,8 @@ is in scope. Azure is explicitly out of scope for implementation (see
     this project that is structurally cross-cloud-necessary — where
     neither single cloud's own data contains any reference to the
     other cloud's trust at all — is Track 1's third-party-bridge shape.
-- Escalation rule engine, pathfinder, and remediation output for both
-  tracks
+- Escalation rule engine, pathfinder, and remediation output for all
+  three tracks
 - A public-facing case study (portfolio site) presenting sanitized
   findings and remediation guidance
 
@@ -128,10 +128,10 @@ absorbed into the "in scope" list as if it had always been there.
 
 ## Success criteria
 
-- Both tracks produce a **true positive**: the tool correctly identifies
-  the planted escalation path, with correct blast-radius/severity
-  reasoning.
-- Both tracks include a **negative control**: a correctly-scoped,
+- All three tracks produce a **true positive**: the tool correctly
+  identifies the planted escalation path, with correct
+  blast-radius/severity reasoning.
+- All three tracks include a **negative control**: a correctly-scoped,
   non-vulnerable configuration that the tool does *not* flag — proving
   the detection logic isn't just pattern-matching on the presence of
   federation, but on the specific misconfiguration.
