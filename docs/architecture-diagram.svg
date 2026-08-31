@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 760 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
 <title id="title">System architecture for the cross-cloud IAM privilege escalation path analyzer</title>
-<desc id="desc">AWS and GCP sandbox APIs feed dedicated collectors, which populate a unified identity graph. The graph flows through a correlation engine, escalation rule engine, and pathfinder in sequence, producing a remediation report and an interactive visualization as outputs.</desc>
+<desc id="desc">AWS and GCP sandbox APIs feed dedicated collectors, which populate a unified identity graph. The graph flows through a correlation engine, escalation rule engine, and pathfinder in sequence, producing findings mapped to MITRE ATT&amp;CK and NIST controls, plus an interactive visualization.</desc>
 
 <style>
   .box { stroke-width: 1; rx: 8; }
@@ -68,7 +68,7 @@
 <g>
   <rect class="box teal" x="270" y="290" width="210" height="56" rx="8"/>
   <text class="th" x="375" y="310" text-anchor="middle" dominant-baseline="central">Escalation Rules</text>
-  <text class="ts" x="375" y="328" text-anchor="middle" dominant-baseline="central">5 pattern checks</text>
+  <text class="ts" x="375" y="328" text-anchor="middle" dominant-baseline="central">3 pattern checks</text>
 </g>
 
 <line x1="480" y1="318" x2="500" y2="318" class="arr" marker-end="url(#arrow)"/>
@@ -84,8 +84,8 @@
 
 <g>
   <rect class="box amber" x="165" y="380" width="200" height="56" rx="8"/>
-  <text class="th" x="265" y="400" text-anchor="middle" dominant-baseline="central">Remediation Report</text>
-  <text class="ts" x="265" y="418" text-anchor="middle" dominant-baseline="central">diff + severity score</text>
+  <text class="th" x="265" y="400" text-anchor="middle" dominant-baseline="central">Findings</text>
+  <text class="ts" x="265" y="418" text-anchor="middle" dominant-baseline="central">MITRE / NIST mapped</text>
 </g>
 
 <g>
