@@ -50,7 +50,7 @@
     when the same identity shows up in both.
   </p>
 
-  <img src="images/graph.png" alt="Full cross-cloud IAM privilege escalation graph showing all three tracks" style="width:100%;height:auto;border-radius:10px;border:1px solid var(--border);margin-top:24px;">
+  <img src="images/graph.png" alt="Full cross-cloud IAM privilege escalation graph showing all three tracks" class="zoomable" style="width:100%;height:auto;border-radius:10px;border:1px solid var(--border);margin-top:24px;">
 
   <h2>The three scenarios</h2>
   <p class="lede" style="font-size:16px;">
@@ -70,7 +70,7 @@
       infrastructure; the detector correctly flags the loose binding
       and stays silent on the correctly-scoped one.
     </p>
-    <img src="images/scenario1.png" alt="Scenario 1 graph: GitHub Actions OIDC bridge federating into AWS and GCP">
+    <img src="images/scenario1.png" alt="Scenario 1 graph: GitHub Actions OIDC bridge federating into AWS and GCP" class="zoomable">
   </div>
 
   <div class="scenario">
@@ -83,7 +83,7 @@
       token was exchanged for a real GCP access token through the
       loose provider.
     </p>
-    <img src="images/scenario2.png" alt="Scenario 2 graph: AWS account federating directly into a GCP owner service account">
+    <img src="images/scenario2.png" alt="Scenario 2 graph: AWS account federating directly into a GCP owner service account" class="zoomable">
   </div>
 
   <div class="scenario">
@@ -97,7 +97,7 @@
       administrator. Also proved live: a real Google identity token,
       exchanged for real temporary AWS admin credentials.
     </p>
-    <img src="images/scenario3.png" alt="Scenario 3 graph: Google identity federating directly into an AWS admin role">
+    <img src="images/scenario3.png" alt="Scenario 3 graph: Google identity federating directly into an AWS admin role" class="zoomable">
   </div>
 
   <h2>Framework mapping and fixes</h2>
@@ -148,5 +148,24 @@
     </a>
   </div>
 </footer>
+<div id="lightbox" onclick="this.classList.remove('active')">
+  <img id="lightbox-img" src="" alt="">
+</div>
+
+<script>
+document.querySelectorAll('.zoomable').forEach(function(img) {
+  img.addEventListener('click', function() {
+    var lightboxImg = document.getElementById('lightbox-img');
+    lightboxImg.src = img.src;
+    lightboxImg.alt = img.alt;
+    document.getElementById('lightbox').classList.add('active');
+  });
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('lightbox').classList.remove('active');
+  }
+});
+</script>
 </body>
 </html>
