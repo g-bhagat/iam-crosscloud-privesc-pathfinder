@@ -19,7 +19,7 @@ until each prior use case works end to end against real sandbox data.
 ## Phase 0 — Shared foundation
 
 - [x] 1. Write the scope / rules-of-engagement doc — done (`SCOPE.md`)
-- [x] 2. Write the threat model doc (trust boundaries, 5 escalation paths, correlation confidence tiers) — done (`docs/THREAT_MODEL.md`)
+- [x] 2. Write the threat model doc (trust boundaries, 3 escalation paths, correlation confidence tiers) — done (`docs/THREAT_MODEL.md`); covers only the three built patterns (Tracks 1-3) — static credential leakage and DR/failover/deprovisioning are tracked as deferred scope below, not modeled in the threat model doc itself
 - [ ] 3. Create a dedicated AWS free-tier sandbox account
 - [ ] 4. Create a dedicated GCP free-tier project
 - [ ] 5. Create a least-privilege, read-only scanning credential in each cloud — both sides now written in Terraform (`terraform/scanner/aws.tf`, `terraform/scanner/gcp.tf`), verified against real, already-validated identities; neither yet `terraform apply`'d against the real sandbox (manual apply/destroy is intentionally kept off Claude Code — see task notes)
@@ -27,7 +27,7 @@ until each prior use case works end to end against real sandbox data.
 - [ ] 7. Get `AWSCollector` running against the real sandbox account, debug against live API responses — validated against a moto-mocked AWS account (`tests/test_aws_collector.py`, `tests/test_collector_correlation_integration.py`); real sandbox validation still pending task 3
 - [x] 8. Implement `GCPCollector` for real — done (`src/collectors/gcp_collector.py`); validated against real API response shapes via mocked unit tests (`tests/test_gcp_collector.py`, 15 cases: service accounts, user-managed keys, WIF pool/provider bridging, the loose/scoped Track 1 bindings, CAI-based is_admin flagging) since no moto-equivalent exists for GCP; `scripts/run_gcp_collector.py` written for live validation against the real sandbox project, to be run locally where ADC is already set up — not yet run against the real project from this session
 - [x] 9. Build the correlation engine (`FEDERATES_WITH` edge detector + 3-tier confidence logic) — done (`src/analysis/correlation.py`, `src/analysis/confidence.py`); validated against synthetic Track 1-shaped data (`sample_data/sample_graph.json`) AND against real (mocked, not hand-crafted) output from both collectors together (`tests/test_collector_correlation_integration.py`); true live-account validation still pending tasks 3-5
-- [x] 10. Build the escalation rule engine (encode the 5 patterns as graph-pattern checks) — done (`src/analysis/escalation_rules.py`); Patterns 1-2 implemented, Patterns 3-5 stubbed as deferred per SCOPE.md
+- [x] 10. Build the escalation rule engine (encode the patterns as graph-pattern checks) — done (`src/analysis/escalation_rules.py`); Patterns 1-3 implemented (pattern 3 shares pattern 2's rule function, direction-aware — see task 40); patterns 4-5 are out of scope per SCOPE.md and have no code representation at all, not stubs
 - [x] 11. Build the pathfinder (graph walk from any node to an `is_admin=True` node) — done (`src/analysis/pathfinder.py`, networkx-based)
 - [x] 12. Build the pyvis visualization export — done (`src/visualization/pyvis_export.py`, `src/sanitize.py`); `sanitize=True` masks real account IDs/ARNs/project IDs, wired in automatically by `scripts/run_detector.py` whenever `--output` resolves under `docs/`; self-loop capability markers merge into one edge per node and zero-degree nodes are hidden by default so a real AdministratorAccess/roles/owner holder does not render as a knot of overlapping loops; a fixed corner annotation on the artifact itself states the scope boundary (escalation-relevant capabilities only, not a full IAM permissions inventory)
 
@@ -85,9 +85,10 @@ See SCOPE.md "Reversed decisions" for the full reasoning.
 
 ## Deferred (documented, not built)
 
-These are real, catalogued escalation patterns — written up in the threat
-model with mechanism, precondition, and blast radius — but deliberately
-not implemented in the reference build.
+These are real escalation patterns, considered and deliberately not
+implemented in the reference build. `docs/THREAT_MODEL.md` covers only
+the three built patterns (Tracks 1-3); these are tracked here only, not
+given a full mechanism/precondition/blast-radius write-up anywhere.
 
 - **Static credential leakage across the cloud boundary** (a GCP key
   stored as a static AWS secret, or vice versa): a genuinely different
