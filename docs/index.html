@@ -53,6 +53,11 @@
   <img src="images/graph.png" alt="Full cross-cloud IAM privilege escalation graph showing all three tracks" style="width:100%;height:auto;border-radius:10px;border:1px solid var(--border);margin-top:24px;">
 
   <h2>The three scenarios</h2>
+  <p class="lede" style="font-size:16px;">
+    Three different trust directions, same underlying mistake each time:
+    a third party trusted by both clouds, GCP trusting AWS directly, and
+    AWS trusting GCP directly.
+  </p>
 
   <div class="scenario">
     <h3>1. A CI/CD identity trusted by both clouds, scoped correctly on one side and not the other</h3>
